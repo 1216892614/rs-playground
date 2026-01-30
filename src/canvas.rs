@@ -1,4 +1,4 @@
-use bevy::{prelude::*, window::WindowResized};
+use bevy::{prelude::*, sprite::Anchor, text::Justify, window::WindowResized};
 use unicode_width::UnicodeWidthChar;
 
 // ==================== 常量（内部） ====================
@@ -196,7 +196,14 @@ impl Canvas {
     }
 
     /// 设置单个字符（带背景色，永远不连写）
-    pub fn set_char_with_bg(&mut self, x: usize, y: usize, ch: char, color: Color, bg_color: Color) {
+    pub fn set_char_with_bg(
+        &mut self,
+        x: usize,
+        y: usize,
+        ch: char,
+        color: Color,
+        bg_color: Color,
+    ) {
         if x >= CANVAS_WIDTH || y >= CANVAS_HEIGHT {
             return;
         }
@@ -249,7 +256,7 @@ impl Canvas {
         self.clear_range_string_content(y, x_start, x_end);
 
         let (final_text, text_width) = Self::fit_text_with_ellipsis(text, available_width);
-        
+
         if final_text.is_empty() {
             self.mark_dirty();
             return;
@@ -320,7 +327,7 @@ impl Canvas {
         }
 
         let (final_text, text_width) = Self::fit_text_with_ellipsis(text, available_width);
-        
+
         if final_text.is_empty() {
             self.mark_dirty();
             return;
@@ -566,15 +573,15 @@ fn load_fonts(mut fonts: ResMut<CanvasFonts>, asset_server: Res<AssetServer>) {
     fonts.load_attempted = true;
 
     info!("=== Loading fonts via Web Assets ===");
-    
+
     // Noto Sans CJK - 主字体（支持中文、日文、韩文和各种符号）
     info!("Loading Noto Sans CJK from GitHub...");
     fonts.noto_sans = Some(asset_server.load(NOTO_SANS_URL));
-    
+
     // Nerd Font - 图标字体（8000+ 开发者图标）
     info!("Loading Nerd Font from GitHub...");
     fonts.nerd_font = Some(asset_server.load(NERD_FONT_URL));
-    
+
     info!("Fonts are downloading from CDN. Please wait 10-30 seconds...");
 }
 
@@ -868,25 +875,29 @@ fn render_canvas(
                         let align = cell.container_align.unwrap_or(TextAlign::Left);
                         let container_width = (container_end - x) as f32;
 
-                        // 文本中心在容器内按对齐计算
-                        let pos_x = match align {
-                            TextAlign::Left => {
-                                origin_x + (x as f32 + cell.span as f32 / 2.0) * cell_size
-                            }
-                            TextAlign::Center => {
-                                origin_x + (x as f32 + container_width / 2.0) * cell_size
-                            }
-                            TextAlign::Right => {
-                                origin_x
-                                    + (container_end as f32 - cell.span as f32 / 2.0) * cell_size
-                            }
+                        // 容器 [x, container_end)：按 align 把“锚点”放在容器左/中/右，文本在该侧对齐
+                        // 左对齐：锚点在容器左边缘，文本从左向右 → 相同 start 的字符串左边缘对齐
+                        let (pos_x, anchor, justify) = match align {
+                            TextAlign::Left => (
+                                origin_x + x as f32 * cell_size,
+                                Anchor::CENTER_LEFT,
+                                Justify::Left,
+                            ),
+                            TextAlign::Center => (
+                                origin_x + (x as f32 + container_width / 2.0) * cell_size,
+                                Anchor::CENTER,
+                                Justify::Center,
+                            ),
+                            TextAlign::Right => (
+                                origin_x + container_end as f32 * cell_size,
+                                Anchor::CENTER_RIGHT,
+                                Justify::Right,
+                            ),
                         };
                         let pos_y = origin_y - (y as f32 + 0.5) * cell_size;
 
-                        // 计算字体大小（考虑连写居中）
                         let font_size = (cell_size * 0.8).max(8.0);
 
-                        // 根据字符类型选择字体
                         let has_nerd_icons = text.chars().any(|c| {
                             let code = c as u32;
                             (code >= 0xE000 && code <= 0xF8FF) || (code >= 0xF0000)
@@ -900,13 +911,17 @@ fn render_canvas(
                             None
                         };
 
+                        let text_layout = TextLayout::new_with_justify(justify);
+
                         if let Some(font_handle) = font {
                             let mut text_font = TextFont::from(font_handle);
                             text_font.font_size = font_size;
                             commands.spawn((
                                 Text2d::new(text),
                                 text_font,
+                                text_layout,
                                 TextColor(cell.color),
+                                anchor,
                                 Transform::from_xyz(pos_x, pos_y, 1.0),
                                 CanvasMarker,
                                 CellEntity { _x: x, _y: y },
@@ -917,7 +932,9 @@ fn render_canvas(
                             commands.spawn((
                                 Text2d::new(text),
                                 text_font,
+                                text_layout,
                                 TextColor(cell.color),
+                                anchor,
                                 Transform::from_xyz(pos_x, pos_y, 1.0),
                                 CanvasMarker,
                                 CellEntity { _x: x, _y: y },
