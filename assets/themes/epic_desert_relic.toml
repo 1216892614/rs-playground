@@ -1,0 +1,76 @@
+[theme]
+name = "epic_desert_relic"
+style = "qud_like"
+description = "Earthy base, ancient relics, neon anomalies"
+
+# ============================================================
+# Core Backgrounds
+# ============================================================
+[colors.background]
+void_ink        = "#0C0F14" # 主背景
+basalt_blue     = "#1A2230" # 面板底 / UI 阴影
+obsidian_moss   = "#2A2E2B" # 中性暗绿灰
+ashen_slate     = "#6D6A5F" # 边框 / 禁用底
+
+# ============================================================
+# Earth & Ruins (terrain / world)
+# ============================================================
+[colors.earth]
+ruined_umber    = "#3A2B1B" # 岩壁 / 皮革
+desert_bronze   = "#5B4526" # 沙砾 / 金属土色
+silt_gold       = "#8C6A3A" # 沙丘高光
+sunbaked_clay   = "#C3A36E" # 浅沙 / 石板
+bone_parchment  = "#F2E6C8" # 亮地表 / 骨质
+
+# ============================================================
+# Typography
+# ============================================================
+[colors.text]
+primary         = "#F2E6C8" # 主文字
+secondary       = "#A8937B" # 次文字
+muted           = "#6D6A5F" # 非重点 / 描述
+disabled        = "#4B4F55" # 禁用文字
+
+# ============================================================
+# Semantic / UI States
+# ============================================================
+[colors.semantic]
+success         = "#31D07A" # 治疗 / 成功
+info            = "#2A8FA1" # 信息 / 可交互
+warning         = "#E6D34A" # 警告 / 任务
+danger          = "#E0493E" # 敌对 / 致命
+fire            = "#FF9A3D" # 火焰 / 热量
+toxic           = "#2E6F5E" # 毒素 / 铜绿
+psi             = "#7A4ED9" # 灵能
+rare            = "#D64CCB" # 稀有 / 传送
+tech_neon       = "#4DF2FF" # 高能科技 / 选中
+
+# ============================================================
+# Rarity (items / entities)
+# ============================================================
+[colors.rarity]
+common          = "#A8937B"
+uncommon        = "#31D07A"
+rare            = "#2763D6"
+epic            = "#7A4ED9"
+legendary       = "#D64CCB"
+artifact        = "#4DF2FF"
+
+# ============================================================
+# Full Grayscale Gradient
+# 用途：FOV 衰减 / 雾 / 扫描线 / 禁用态 / 距离
+# ============================================================
+[colors.grayscale]
+g00_black       = "#000000"
+g05_charcoal    = "#0E0E11"
+g10_ink         = "#15171C"
+g15_dark        = "#1D2027"
+g20_graphite    = "#252933"
+g30_slate       = "#343A45"
+g40_ash         = "#4B4F55"
+g50_mid         = "#6A6F78"
+g60_fog         = "#8A9099"
+g70_mist        = "#A8AEB6"
+g80_silver      = "#C5CAD0"
+g90_pale        = "#E1E4E8"
+g100_white      = "#FFFFFF"
