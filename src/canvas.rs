@@ -3,8 +3,8 @@ use unicode_width::UnicodeWidthChar;
 
 // ==================== 常量（内部） ====================
 
-const CANVAS_WIDTH: usize = 96;
-const CANVAS_HEIGHT: usize = 54;
+pub const CANVAS_WIDTH: usize = 96;
+pub const CANVAS_HEIGHT: usize = 54;
 const BASE_CELL_SIZE: f32 = 16.0; // 基础单元格尺寸（像素）
 const SCALE_SAFETY_MARGIN: f32 = 0.98; // 安全边距，确保画布不会被遮挡
 const CONTAINER_PADDING_PX: f32 = 2.0; // 单行容器左右内边距（像素）
@@ -91,6 +91,8 @@ pub struct Canvas {
     cell_size: f32,
     scale: f32,
     dirty: bool,
+    /// 是否绘制网格线（可由状态栏开关控制）
+    grid_visible: bool,
 }
 
 impl Canvas {
@@ -101,6 +103,26 @@ impl Canvas {
             cell_size: BASE_CELL_SIZE,
             scale: 1.0,
             dirty: true,
+            grid_visible: true,
+        }
+    }
+
+    pub fn cell_size(&self) -> f32 {
+        self.cell_size
+    }
+
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    pub fn grid_visible(&self) -> bool {
+        self.grid_visible
+    }
+
+    pub fn set_grid_visible(&mut self, visible: bool) {
+        if self.grid_visible != visible {
+            self.grid_visible = visible;
+            self.mark_dirty();
         }
     }
 
@@ -997,37 +1019,39 @@ fn render_canvas(
         }
     }
 
-    // 在 cell 交界处渲染黑色细网格线
-    const GRID_LINE_COLOR: Color = Color::BLACK;
-    let line_thickness = 0.5;
+    // 在 cell 交界处渲染黑色细网格线（可由状态栏开关关闭）
+    if canvas.grid_visible {
+        const GRID_LINE_COLOR: Color = Color::BLACK;
+        let line_thickness = 0.1;
 
-    // 垂直线：x = origin_x + i * cell_size, i = 0..=96
-    for i in 0..=CANVAS_WIDTH {
-        let x = origin_x + i as f32 * cell_size;
-        let center_y = origin_y - canvas_height / 2.0;
-        commands.spawn((
-            Sprite {
-                color: GRID_LINE_COLOR,
-                custom_size: Some(Vec2::new(line_thickness, canvas_height + line_thickness)),
-                ..default()
-            },
-            Transform::from_xyz(x, center_y, 2.0), // Z=2 置于最上以便调试
-            CanvasMarker,
-        ));
-    }
+        // 垂直线：x = origin_x + i * cell_size, i = 0..=96
+        for i in 0..=CANVAS_WIDTH {
+            let x = origin_x + i as f32 * cell_size;
+            let center_y = origin_y - canvas_height / 2.0;
+            commands.spawn((
+                Sprite {
+                    color: GRID_LINE_COLOR,
+                    custom_size: Some(Vec2::new(line_thickness, canvas_height + line_thickness)),
+                    ..default()
+                },
+                Transform::from_xyz(x, center_y, 2.0),
+                CanvasMarker,
+            ));
+        }
 
-    // 水平线：y = origin_y - j * cell_size, j = 0..=54
-    for j in 0..=CANVAS_HEIGHT {
-        let y = origin_y - j as f32 * cell_size;
-        let center_x = origin_x + canvas_width / 2.0;
-        commands.spawn((
-            Sprite {
-                color: GRID_LINE_COLOR,
-                custom_size: Some(Vec2::new(canvas_width + line_thickness, line_thickness)),
-                ..default()
-            },
-            Transform::from_xyz(center_x, y, 2.0),
-            CanvasMarker,
-        ));
+        // 水平线：y = origin_y - j * cell_size, j = 0..=54
+        for j in 0..=CANVAS_HEIGHT {
+            let y = origin_y - j as f32 * cell_size;
+            let center_x = origin_x + canvas_width / 2.0;
+            commands.spawn((
+                Sprite {
+                    color: GRID_LINE_COLOR,
+                    custom_size: Some(Vec2::new(canvas_width + line_thickness, line_thickness)),
+                    ..default()
+                },
+                Transform::from_xyz(center_x, y, 2.0),
+                CanvasMarker,
+            ));
+        }
     }
 }
