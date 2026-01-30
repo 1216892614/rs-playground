@@ -31,13 +31,23 @@ const TIMELINE_VIEW_BOTTOM: usize = 40;
 const TIMELINE_CENTER_Y: usize = (TIMELINE_VIEW_TOP + TIMELINE_VIEW_BOTTOM) / 2; // 23
 /// 节点之间相隔 4 格
 const NODE_SPACING: usize = 4;
-/// 节点标签起始 x
+/// 节点标签起始 x（时间轴区域收窄，右侧留给分叉列表）
 const LABEL_X_START: usize = 6;
-const LABEL_X_END: usize = 90;
+const LABEL_X_END: usize = 36;
 
-/// 标题位置
+/// 标题位置；标题右侧可显示当前分叉信息（非主线时）
 const TITLE_X: usize = 2;
 const TITLE_Y: usize = 2;
+const TITLE_FORK_INFO_X: usize = 38; // 分叉于[时间][章节][#序号] 起始 x
+
+/// 右侧分叉列表（从当前选中存档分出的其他 fork），标题在上方一行
+const FORK_LIST_X_START: usize = 40;
+const FORK_LIST_X_END: usize = 76;
+const FORK_LIST_ROW_START: usize = 6;
+const FORK_LIST_ROW_END: usize = 40;
+const FORK_LIST_TITLE_ROW: usize = 4;
+/// 每个分叉项占 2 行
+const FORK_ITEM_HEIGHT: usize = 2;
 
 /// 控制按钮行（游戏开始、上一章、上一个存档、下一个存档、下一章、最新进度）
 const CONTROLS_ROW_Y: usize = 44;
@@ -136,6 +146,63 @@ fn to_chinese_num(n: usize) -> String {
     }
 }
 
+// ==================== 分支（树状存档） ====================
+
+/// 从某存档分出的分支的元信息；主线无此信息
+#[derive(Clone, Debug)]
+struct ForkMeta {
+    /// 分叉时间显示，如 "01:15:00"
+    pub time: String,
+    /// 分叉时章节，如 "第一章"
+    pub chapter: String,
+    /// 分叉序号
+    pub seq: usize,
+}
+
+/// 一条分支：主线或从某节点分出的 fork
+#[derive(Clone, Debug)]
+struct Branch {
+    pub timeline: Vec<TimelineNode>,
+    /// 若为 fork，则表示从哪条分支的哪个节点分出
+    pub fork_from: Option<(usize, usize)>,
+    pub fork_meta: Option<ForkMeta>,
+}
+
+fn default_branches() -> Vec<Branch> {
+    let main_nodes = default_timeline_nodes();
+    let mut branches = vec![Branch {
+        timeline: main_nodes.clone(),
+        fork_from: None,
+        fork_meta: None,
+    }];
+    // 示例：从主线第 5 个节点分出的 fork，沿用前 6 个节点后接一段新进度
+    let mut fork_nodes: Vec<TimelineNode> = main_nodes.iter().take(6).cloned().collect();
+    for i in 6..=16usize {
+        let t_min = 25 + i * 4;
+        let h = t_min / 60;
+        let m = t_min % 60;
+        let duration_display = format!("{:02}:{:02}:00", h, m);
+        let ch = (i.saturating_sub(1)) / 4 + 1;
+        let chapter_name = format!("第{}章", to_chinese_num(ch));
+        let is_chapter = i % 4 == 0;
+        fork_nodes.push(TimelineNode {
+            is_chapter,
+            chapter_name,
+            duration_display,
+        });
+    }
+    branches.push(Branch {
+        timeline: fork_nodes,
+        fork_from: Some((0, 5)),
+        fork_meta: Some(ForkMeta {
+            time: "01:15:00".to_string(),
+            chapter: "第一章".to_string(),
+            seq: 1,
+        }),
+    });
+    branches
+}
+
 // ==================== 控制按钮 ====================
 
 /// 控制栏从左到右：游戏开始、上一章、上一个存档、下一个存档、下一章、最新进度
@@ -211,14 +278,16 @@ fn cell_to_back_button(x: usize, y: usize) -> bool {
     y == BACK_BTN_Y && x >= BACK_BTN_X_START && x < BACK_BTN_X_END
 }
 
-/// 时间轴上节点对应的 cell：选中节点固定在 TIMELINE_CENTER_Y，y 对应节点 idx = target + (y - CENTER) / NODE_SPACING
+/// 时间轴上节点对应的 cell：左侧点/竖线 (x<=4) 或右侧标题 (LABEL_X_START..LABEL_X_END) 均可触发；y 对应节点 idx = target + (y - CENTER) / NODE_SPACING
 fn cell_to_timeline_node_index(
     x: usize,
     y: usize,
     nodes: &[TimelineNode],
     target: usize,
 ) -> Option<usize> {
-    if x > 4 {
+    let in_left = x <= 4;
+    let in_label = x >= LABEL_X_START && x < LABEL_X_END;
+    if !in_left && !in_label {
         return None;
     }
     if y < TIMELINE_VIEW_TOP || y > TIMELINE_VIEW_BOTTOM {
@@ -237,48 +306,133 @@ fn cell_to_timeline_node_index(
     }
 }
 
+/// 当前选中节点分出的 fork 的 branch_id 列表（不含父分支）
+fn fork_branch_ids_from(branches: &[Branch], from_branch_id: usize, from_node: usize) -> Vec<usize> {
+    branches
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.fork_from == Some((from_branch_id, from_node)))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// 右侧列表应显示的 branch_id：在分叉点包含父分支（主线），其余为从该节点分出的 fork；不包含当前分支自己
+fn list_branch_ids(state: &SaveLoadState) -> Vec<usize> {
+    let branches = &state.branches;
+    let cur = state.current_branch_id;
+    let target = state.target;
+    let ids: Vec<usize> = if let Some((parent_id, from_node)) = state.current_branch().fork_from {
+        if target == from_node {
+            let mut list = vec![parent_id];
+            list.extend(fork_branch_ids_from(branches, parent_id, from_node));
+            list
+        } else {
+            fork_branch_ids_from(branches, cur, target)
+        }
+    } else {
+        fork_branch_ids_from(branches, cur, target)
+    };
+    ids.into_iter().filter(|&id| id != cur).collect()
+}
+
+/// 右侧分叉列表：点击区域 (x,y) 对应列表中的第几项（考虑滚动）；不在列表内返回 None
+fn cell_to_fork_list_index(
+    x: usize,
+    y: usize,
+    fork_count: usize,
+    fork_list_offset: usize,
+) -> Option<usize> {
+    if x < FORK_LIST_X_START || x >= FORK_LIST_X_END {
+        return None;
+    }
+    if y < FORK_LIST_ROW_START || y > FORK_LIST_ROW_END {
+        return None;
+    }
+    let row = y - FORK_LIST_ROW_START;
+    let item = row / FORK_ITEM_HEIGHT;
+    let idx = fork_list_offset + item;
+    if idx < fork_count {
+        Some(idx)
+    } else {
+        None
+    }
+}
+
 // ==================== 状态 ====================
 
 #[derive(Resource)]
 struct SaveLoadState {
+    /// 所有分支（主线 + 各 fork）
+    branches: Vec<Branch>,
+    /// 当前查看的分支 id
+    current_branch_id: usize,
+    /// 当前分支的时间轴（= branches[current_branch_id].timeline）
     nodes: Vec<TimelineNode>,
     target: usize,
     view: f32,
+    /// 右侧分叉列表滚动偏移（第几项开始显示）
+    fork_list_offset: usize,
     hovered_control: Option<SaveLoadControlButton>,
     hovered_continue: bool,
     hovered_back: bool,
     hovered_node: Option<usize>,
+    /// 右侧分叉列表中悬浮的项（列表内索引，非 branch_id）
+    hovered_fork_index: Option<usize>,
     prev_app_state: Option<AppState>,
     prev_target: usize,
+    prev_branch_id: usize,
+    prev_fork_list_offset: usize,
     prev_hovered_control: Option<SaveLoadControlButton>,
     prev_hovered_continue: bool,
     prev_hovered_back: bool,
     prev_hovered_node: Option<usize>,
+    prev_hovered_fork_index: Option<usize>,
 }
 
 impl Default for SaveLoadState {
     fn default() -> Self {
-        let nodes = default_timeline_nodes();
+        let branches = default_branches();
+        let current_branch_id = 0;
+        let nodes = branches[0].timeline.clone();
         let last = nodes.len().saturating_sub(1);
         Self {
+            branches,
+            current_branch_id,
             nodes,
             target: last,
             view: last as f32,
+            fork_list_offset: 0,
             hovered_control: None,
             hovered_continue: false,
             hovered_back: false,
             hovered_node: None,
+            hovered_fork_index: None,
             prev_app_state: None,
             prev_target: last,
+            prev_branch_id: 0,
+            prev_fork_list_offset: 0,
             prev_hovered_control: None,
             prev_hovered_continue: false,
             prev_hovered_back: false,
             prev_hovered_node: None,
+            prev_hovered_fork_index: None,
         }
     }
 }
 
 impl SaveLoadState {
+    /// 当前分支引用
+    fn current_branch(&self) -> &Branch {
+        &self.branches[self.current_branch_id]
+    }
+    /// 是否为主线（第一个分支）
+    fn is_main_branch(&self) -> bool {
+        self.current_branch_id == 0
+    }
+    /// 右侧列表应显示的 branch_id（分叉点含父分支，否则为该节点分出的 fork）
+    fn list_branch_ids(&self) -> Vec<usize> {
+        list_branch_ids(self)
+    }
     /// 右下角：当前选中存档的「第几章 + 时长」
     fn current_chapter_and_duration(&self) -> String {
         self.nodes
@@ -289,6 +443,17 @@ impl SaveLoadState {
     /// 是否为最新进度（只有最新进度显示「继续游戏」）
     fn is_latest_progress(&self) -> bool {
         self.nodes.len() > 0 && self.target == self.nodes.len() - 1
+    }
+    /// 切换到指定分支，并定位到该分支最新进度（不更新 prev_*，由绘制帧末更新，以便本帧触发重绘）
+    fn switch_to_branch(&mut self, branch_id: usize) {
+        if branch_id >= self.branches.len() || branch_id == self.current_branch_id {
+            return;
+        }
+        self.current_branch_id = branch_id;
+        self.nodes = self.branches[branch_id].timeline.clone();
+        let last = self.nodes.len().saturating_sub(1);
+        self.target = last;
+        self.view = last as f32;
     }
 }
 
@@ -301,6 +466,7 @@ fn save_load_enter_latest(mut state: ResMut<SaveLoadState>) {
     state.target = last;
     state.view = last as f32;
     state.prev_target = last;
+    state.prev_branch_id = state.current_branch_id;
 }
 
 impl Plugin for SaveLoadPlugin {
@@ -374,20 +540,26 @@ fn save_load_cell_events(
                 state.hovered_continue = false;
                 state.hovered_back = false;
                 state.hovered_node = None;
+                state.hovered_fork_index = None;
                 external.0 = None;
             }
             Some((x, y)) => {
+                let fork_ids = state.list_branch_ids();
+                let fork_count = fork_ids.len();
+                let fork_idx = cell_to_fork_list_index(x, y, fork_count, state.fork_list_offset);
                 if let Some(btn) = cell_to_control_button(x, y) {
                     state.hovered_control = Some(btn);
                     state.hovered_continue = false;
                     state.hovered_back = false;
                     state.hovered_node = None;
+                    state.hovered_fork_index = None;
                     external.0 = Some(btn.hover_label().to_string());
                 } else if cell_to_continue_button(x, y) {
                     state.hovered_control = None;
                     state.hovered_continue = true;
                     state.hovered_back = false;
                     state.hovered_node = None;
+                    state.hovered_fork_index = None;
                     external.0 = Some(if state.is_latest_progress() {
                         "继续游戏".to_string()
                     } else {
@@ -398,6 +570,7 @@ fn save_load_cell_events(
                     state.hovered_continue = false;
                     state.hovered_back = true;
                     state.hovered_node = None;
+                    state.hovered_fork_index = None;
                     external.0 = Some("返回主菜单".to_string());
                 } else if let Some(idx) = cell_to_timeline_node_index(x, y, &state.nodes, state.target)
                 {
@@ -405,12 +578,28 @@ fn save_load_cell_events(
                     state.hovered_continue = false;
                     state.hovered_back = false;
                     state.hovered_node = Some(idx);
+                    state.hovered_fork_index = None;
                     external.0 = Some(state.nodes[idx].label());
+                } else if let Some(fi) = fork_idx {
+                    state.hovered_control = None;
+                    state.hovered_continue = false;
+                    state.hovered_back = false;
+                    state.hovered_node = None;
+                    state.hovered_fork_index = Some(fi);
+                    let bid = fork_ids[fi];
+                    let b = &state.branches[bid];
+                    external.0 = Some(
+                        b.fork_meta
+                            .as_ref()
+                            .map(|m| format!("切换到 [{}] #{}", m.time, m.seq))
+                            .unwrap_or_else(|| "切换到 [00:00:00] 序章 #0".to_string()),
+                    );
                 } else {
                     state.hovered_control = None;
                     state.hovered_continue = false;
                     state.hovered_back = false;
                     state.hovered_node = None;
+                    state.hovered_fork_index = None;
                     external.0 = None;
                 }
             }
@@ -457,6 +646,14 @@ fn save_load_cell_events(
             next_state.set(AppState::MainMenu);
         } else if let Some(idx) = cell_to_timeline_node_index(x, y, &state.nodes, state.target) {
             state.target = idx;
+        } else {
+            let fork_ids = state.list_branch_ids();
+            let fork_count = fork_ids.len();
+            if let Some(fi) = cell_to_fork_list_index(x, y, fork_count, state.fork_list_offset) {
+                if fi < fork_count {
+                    state.switch_to_branch(fork_ids[fi]);
+                }
+            }
         }
     }
 }
@@ -480,18 +677,25 @@ fn save_load_draw(
     let just_entered = state.prev_app_state != Some(AppState::SaveLoad);
     state.prev_app_state = Some(AppState::SaveLoad);
 
-    let content_changed = just_entered || state.target != state.prev_target;
+    let content_changed = just_entered
+        || state.target != state.prev_target
+        || state.current_branch_id != state.prev_branch_id
+        || state.fork_list_offset != state.prev_fork_list_offset;
     let timeline_hover_changed = state.hovered_node != state.prev_hovered_node;
     let controller_hover_changed = state.hovered_control != state.prev_hovered_control
         || state.hovered_continue != state.prev_hovered_continue
-        || state.hovered_back != state.prev_hovered_back;
+        || state.hovered_back != state.prev_hovered_back
+        || state.hovered_fork_index != state.prev_hovered_fork_index;
 
     if !content_changed && !timeline_hover_changed && !controller_hover_changed {
         state.prev_target = state.target;
+        state.prev_branch_id = state.current_branch_id;
+        state.prev_fork_list_offset = state.fork_list_offset;
         state.prev_hovered_control = state.hovered_control;
         state.prev_hovered_continue = state.hovered_continue;
         state.prev_hovered_back = state.hovered_back;
         state.prev_hovered_node = state.hovered_node;
+        state.prev_hovered_fork_index = state.hovered_fork_index;
         return;
     }
 
@@ -526,13 +730,16 @@ fn save_load_draw(
     }
 
     state.prev_target = state.target;
+    state.prev_branch_id = state.current_branch_id;
+    state.prev_fork_list_offset = state.fork_list_offset;
     state.prev_hovered_control = state.hovered_control;
     state.prev_hovered_continue = state.hovered_continue;
     state.prev_hovered_back = state.hovered_back;
     state.prev_hovered_node = state.hovered_node;
+    state.prev_hovered_fork_index = state.hovered_fork_index;
 }
 
-/// 时间轴图层：标题、竖线、节点（无 hover）
+/// 时间轴图层：标题（含分叉信息）、竖线、节点；右侧分叉列表
 fn draw_timeline_content(
     canvas: &mut Canvas,
     state: &SaveLoadState,
@@ -545,10 +752,22 @@ fn draw_timeline_content(
         TIMELINE_CONTENT_LAYER,
         TITLE_Y,
         TITLE_X,
-        TITLE_X + 12,
-        "[游戏存档]",
+        TITLE_X + 8,
+        "存档页面",
         TextAlign::Left,
         text_color,
+    );
+    let fork_info = state.current_branch().fork_meta.as_ref().map(|m| {
+        format!("分叉与 [{}] {} [#{}]", m.time, m.chapter, m.seq)
+    }).unwrap_or_else(|| "分叉与 [00:00:00] 序章 [#0]".to_string());
+    canvas.set_line_layer(
+        TIMELINE_CONTENT_LAYER,
+        TITLE_Y,
+        TITLE_FORK_INFO_X,
+        FORK_LIST_X_END,
+        &fork_info,
+        TextAlign::Left,
+        dim_color,
     );
     for y in TIMELINE_VIEW_TOP..=TIMELINE_VIEW_BOTTOM {
         canvas.set_char_layer(TIMELINE_CONTENT_LAYER, TIMELINE_X, y, '│', dim_color);
@@ -558,6 +777,11 @@ fn draw_timeline_content(
             + (idx as i32 - state.target as i32) * NODE_SPACING as i32) as usize;
         if y < TIMELINE_VIEW_TOP || y > TIMELINE_VIEW_BOTTOM {
             continue;
+        }
+        let has_forks = !fork_branch_ids_from(&state.branches, state.current_branch_id, idx).is_empty()
+            || state.current_branch().fork_from.map(|(_, from_node)| from_node == idx).unwrap_or(false);
+        if has_forks {
+            canvas.set_char_layer(TIMELINE_CONTENT_LAYER, TIMELINE_X.saturating_sub(1), y, '◇', dim_color);
         }
         let is_selected = idx == state.target;
         let dot_ch = if is_selected { '●' } else { '◦' };
@@ -574,6 +798,49 @@ fn draw_timeline_content(
             TextAlign::Left,
             label_color,
         );
+    }
+    let fork_ids = state.list_branch_ids();
+    if !fork_ids.is_empty() {
+        canvas.set_line_layer(
+            TIMELINE_CONTENT_LAYER,
+            FORK_LIST_TITLE_ROW,
+            FORK_LIST_X_START,
+            FORK_LIST_X_END,
+            "分叉",
+            TextAlign::Left,
+            dim_color,
+        );
+    }
+    for (list_idx, &branch_id) in fork_ids.iter().skip(state.fork_list_offset).enumerate() {
+        let row0 = FORK_LIST_ROW_START + list_idx * FORK_ITEM_HEIGHT;
+        if row0 > FORK_LIST_ROW_END {
+            break;
+        }
+        let branch = &state.branches[branch_id];
+        let (line1, line2) = match &branch.fork_meta {
+            Some(m) => (format!("[{}] {}", m.time, m.chapter), format!("#{}", m.seq)),
+            None => ("[00:00:00] 序章".to_string(), "#0".to_string()),
+        };
+        canvas.set_line_layer(
+            TIMELINE_CONTENT_LAYER,
+            row0,
+            FORK_LIST_X_START,
+            FORK_LIST_X_END,
+            &line1,
+            TextAlign::Left,
+            dim_color,
+        );
+        if row0 + 1 <= FORK_LIST_ROW_END {
+            canvas.set_line_layer(
+                TIMELINE_CONTENT_LAYER,
+                row0 + 1,
+                FORK_LIST_X_START,
+                FORK_LIST_X_END,
+                &line2,
+                TextAlign::Left,
+                dim_color,
+            );
+        }
     }
 }
 
@@ -690,7 +957,7 @@ fn draw_timeline_hover(
     }
 }
 
-/// 控制器 hover 层：仅控制按钮与继续按钮高亮
+/// 控制器 hover 层：控制按钮、继续按钮、分叉列表项高亮
 fn draw_controller_hover(
     canvas: &mut Canvas,
     state: &SaveLoadState,
@@ -714,6 +981,22 @@ fn draw_controller_hover(
             1,
             hover_bg,
         );
+    }
+    if let Some(fork_idx) = state.hovered_fork_index {
+        let row0 = FORK_LIST_ROW_START
+            .saturating_add(
+                fork_idx.saturating_sub(state.fork_list_offset) * FORK_ITEM_HEIGHT,
+            );
+        if row0 <= FORK_LIST_ROW_END {
+            canvas.fill_background_rect_layer(
+                CONTROLLER_HOVER_LAYER,
+                FORK_LIST_X_START,
+                row0,
+                FORK_LIST_X_END.saturating_sub(FORK_LIST_X_START),
+                FORK_ITEM_HEIGHT.min(FORK_LIST_ROW_END - row0 + 1),
+                hover_bg,
+            );
+        }
     }
     if state.hovered_continue {
         canvas.fill_background_rect_layer(
