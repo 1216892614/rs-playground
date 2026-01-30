@@ -7,6 +7,7 @@ const CANVAS_WIDTH: usize = 96;
 const CANVAS_HEIGHT: usize = 54;
 const BASE_CELL_SIZE: f32 = 16.0; // 基础单元格尺寸（像素）
 const SCALE_SAFETY_MARGIN: f32 = 0.98; // 安全边距，确保画布不会被遮挡
+const CONTAINER_PADDING_PX: f32 = 2.0; // 单行容器左右内边距（像素）
 
 // Web 字体 CDN 链接（GitHub Raw）
 const NOTO_SANS_URL: &str = "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf";
@@ -236,8 +237,8 @@ impl Canvas {
         self.mark_dirty();
     }
 
-    /// 设置字符串（在指定范围内连写渲染，支持对齐和省略）
-    pub fn set_string(
+    /// 设置单行文本（在指定范围内连写渲染，支持对齐和省略；后续可扩展为多行）
+    pub fn set_line(
         &mut self,
         y: usize,
         x_start: usize,
@@ -300,8 +301,8 @@ impl Canvas {
         self.mark_dirty();
     }
 
-    /// 设置字符串（带背景色）
-    pub fn set_string_with_bg(
+    /// 设置单行文本（带背景色）
+    pub fn set_line_with_bg(
         &mut self,
         y: usize,
         x_start: usize,
@@ -653,9 +654,9 @@ pub enum CanvasCommand {
     /// 设置字符带背景 (x, y, char, fg_color, bg_color)
     SetCharWithBg(usize, usize, char, Color, Color),
     /// 设置字符串 (y, x_start, x_end, text, align, color)
-    SetString(usize, usize, usize, String, TextAlign, Color),
+    SetLine(usize, usize, usize, String, TextAlign, Color),
     /// 设置字符串带背景 (y, x_start, x_end, text, align, fg_color, bg_color)
-    SetStringWithBg(usize, usize, usize, String, TextAlign, Color, Color),
+    SetLineWithBg(usize, usize, usize, String, TextAlign, Color, Color),
     /// 设置 SVG (x, y, svg_id, color)
     SetSvg(usize, usize, String, Color),
     /// 填充背景矩形 (x, y, width, height, bg_color)
@@ -688,11 +689,11 @@ fn process_canvas_commands(
             CanvasCommand::SetCharWithBg(x, y, ch, fg, bg) => {
                 canvas.set_char_with_bg(*x, *y, *ch, *fg, *bg);
             }
-            CanvasCommand::SetString(y, x_start, x_end, text, align, color) => {
-                canvas.set_string(*y, *x_start, *x_end, text, *align, *color);
+            CanvasCommand::SetLine(y, x_start, x_end, text, align, color) => {
+                canvas.set_line(*y, *x_start, *x_end, text, *align, *color);
             }
-            CanvasCommand::SetStringWithBg(y, x_start, x_end, text, align, fg, bg) => {
-                canvas.set_string_with_bg(*y, *x_start, *x_end, text, *align, *fg, *bg);
+            CanvasCommand::SetLineWithBg(y, x_start, x_end, text, align, fg, bg) => {
+                canvas.set_line_with_bg(*y, *x_start, *x_end, text, *align, *fg, *bg);
             }
             CanvasCommand::SetSvg(x, y, svg_id, color) => {
                 canvas.set_svg(*x, *y, svg_id, *color);
@@ -875,11 +876,10 @@ fn render_canvas(
                         let align = cell.container_align.unwrap_or(TextAlign::Left);
                         let container_width = (container_end - x) as f32;
 
-                        // 容器 [x, container_end)：按 align 把“锚点”放在容器左/中/右，文本在该侧对齐
-                        // 左对齐：锚点在容器左边缘，文本从左向右 → 相同 start 的字符串左边缘对齐
+                        // 容器 [x, container_end)：左右各 CONTAINER_PADDING_PX 内边距，按 align 放置文本
                         let (pos_x, anchor, justify) = match align {
                             TextAlign::Left => (
-                                origin_x + x as f32 * cell_size,
+                                origin_x + x as f32 * cell_size + CONTAINER_PADDING_PX,
                                 Anchor::CENTER_LEFT,
                                 Justify::Left,
                             ),
@@ -889,7 +889,7 @@ fn render_canvas(
                                 Justify::Center,
                             ),
                             TextAlign::Right => (
-                                origin_x + container_end as f32 * cell_size,
+                                origin_x + container_end as f32 * cell_size - CONTAINER_PADDING_PX,
                                 Anchor::CENTER_RIGHT,
                                 Justify::Right,
                             ),
@@ -913,33 +913,28 @@ fn render_canvas(
 
                         let text_layout = TextLayout::new_with_justify(justify);
 
-                        if let Some(font_handle) = font {
-                            let mut text_font = TextFont::from(font_handle);
-                            text_font.font_size = font_size;
-                            commands.spawn((
-                                Text2d::new(text),
-                                text_font,
-                                text_layout,
-                                TextColor(cell.color),
-                                anchor,
-                                Transform::from_xyz(pos_x, pos_y, 1.0),
-                                CanvasMarker,
-                                CellEntity { _x: x, _y: y },
-                            ));
-                        } else {
-                            let mut text_font = TextFont::default();
-                            text_font.font_size = font_size;
-                            commands.spawn((
-                                Text2d::new(text),
-                                text_font,
-                                text_layout,
-                                TextColor(cell.color),
-                                anchor,
-                                Transform::from_xyz(pos_x, pos_y, 1.0),
-                                CanvasMarker,
-                                CellEntity { _x: x, _y: y },
-                            ));
-                        }
+                        // 与 Bevy 官方 text2d 示例一致：显式构造 TextFont，确保字体 handle 被正确使用
+                        let text_font = match &font {
+                            Some(handle) => TextFont {
+                                font: handle.clone(),
+                                font_size,
+                                ..default()
+                            },
+                            None => TextFont {
+                                font_size,
+                                ..default()
+                            },
+                        };
+                        commands.spawn((
+                            Text2d::new(text),
+                            text_font,
+                            text_layout,
+                            TextColor(cell.color),
+                            anchor,
+                            Transform::from_xyz(pos_x, pos_y, 1.0),
+                            CanvasMarker,
+                            CellEntity { _x: x, _y: y },
+                        ));
 
                         x += cell.span;
                     } else {
@@ -957,29 +952,25 @@ fn render_canvas(
                         } else {
                             None
                         };
-                        if let Some(font_handle) = font {
-                            let mut text_font = TextFont::from(font_handle);
-                            text_font.font_size = font_size;
-                            commands.spawn((
-                                Text2d::new(single_text),
-                                text_font,
-                                TextColor(cell.color),
-                                Transform::from_xyz(pos_x, pos_y, 1.0),
-                                CanvasMarker,
-                                CellEntity { _x: x, _y: y },
-                            ));
-                        } else {
-                            let mut text_font = TextFont::default();
-                            text_font.font_size = font_size;
-                            commands.spawn((
-                                Text2d::new(single_text),
-                                text_font,
-                                TextColor(cell.color),
-                                Transform::from_xyz(pos_x, pos_y, 1.0),
-                                CanvasMarker,
-                                CellEntity { _x: x, _y: y },
-                            ));
-                        }
+                        let text_font = match &font {
+                            Some(handle) => TextFont {
+                                font: handle.clone(),
+                                font_size,
+                                ..default()
+                            },
+                            None => TextFont {
+                                font_size,
+                                ..default()
+                            },
+                        };
+                        commands.spawn((
+                            Text2d::new(single_text),
+                            text_font,
+                            TextColor(cell.color),
+                            Transform::from_xyz(pos_x, pos_y, 1.0),
+                            CanvasMarker,
+                            CellEntity { _x: x, _y: y },
+                        ));
                         x += 1;
                     }
                 }
@@ -1006,9 +997,9 @@ fn render_canvas(
         }
     }
 
-    // 调试：在 cell 交界处渲染 1px 灰色网格线
-    const GRID_LINE_COLOR: Color = Color::srgb(0.35, 0.35, 0.35);
-    let line_thickness = (cell_size / 12.0).max(0.5); // 约 1 像素宽
+    // 在 cell 交界处渲染黑色细网格线
+    const GRID_LINE_COLOR: Color = Color::BLACK;
+    let line_thickness = 0.5;
 
     // 垂直线：x = origin_x + i * cell_size, i = 0..=96
     for i in 0..=CANVAS_WIDTH {

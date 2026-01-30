@@ -25,7 +25,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
     commands.spawn(Camera2d::default());
 
     // 绘制主题演示（使用新 API：y, x_start, x_end, text, align, color）
-    canvas.set_string(
+    canvas.set_line(
         2,
         2,
         50,
@@ -33,7 +33,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         TextAlign::Left,
         theme.text.primary,
     );
-    canvas.set_string(
+    canvas.set_line(
         4,
         2,
         50,
@@ -58,7 +58,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
     canvas.set_char(95, 53, '┘', theme.bg.ashen_slate);
 
     // 地形色演示
-    canvas.set_string(
+    canvas.set_line(
         7,
         2,
         22,
@@ -67,18 +67,18 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         theme.earth.silt_gold,
     );
     canvas.set_char(2, 9, '█', theme.earth.ruined_umber);
-    canvas.set_string(9, 4, 20, "岩壁/皮革", TextAlign::Left, theme.text.muted);
+    canvas.set_line(9, 4, 20, "岩壁/皮革", TextAlign::Left, theme.text.muted);
     canvas.set_char(2, 10, '█', theme.earth.desert_bronze);
-    canvas.set_string(10, 4, 20, "沙砾/金属", TextAlign::Left, theme.text.muted);
+    canvas.set_line(10, 4, 20, "沙砾/金属", TextAlign::Left, theme.text.muted);
     canvas.set_char(2, 11, '█', theme.earth.silt_gold);
-    canvas.set_string(11, 4, 20, "沙丘高光", TextAlign::Left, theme.text.muted);
+    canvas.set_line(11, 4, 20, "沙丘高光", TextAlign::Left, theme.text.muted);
     canvas.set_char(2, 12, '█', theme.earth.sunbaked_clay);
-    canvas.set_string(12, 4, 20, "浅沙/石板", TextAlign::Left, theme.text.muted);
+    canvas.set_line(12, 4, 20, "浅沙/石板", TextAlign::Left, theme.text.muted);
     canvas.set_char(2, 13, '█', theme.earth.bone_parchment);
-    canvas.set_string(13, 4, 20, "亮地表/骨质", TextAlign::Left, theme.text.muted);
+    canvas.set_line(13, 4, 20, "亮地表/骨质", TextAlign::Left, theme.text.muted);
 
     // 语义色演示
-    canvas.set_string(
+    canvas.set_line(
         7,
         25,
         45,
@@ -86,9 +86,9 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         TextAlign::Left,
         theme.semantic.tech_neon,
     );
-    canvas.set_string(9, 25, 34, "✓ 成功", TextAlign::Left, theme.semantic.success);
-    canvas.set_string(10, 25, 34, "ℹ 信息", TextAlign::Left, theme.semantic.info);
-    canvas.set_string(
+    canvas.set_line(9, 25, 34, "✓ 成功", TextAlign::Left, theme.semantic.success);
+    canvas.set_line(10, 25, 34, "ℹ 信息", TextAlign::Left, theme.semantic.info);
+    canvas.set_line(
         11,
         25,
         34,
@@ -96,12 +96,12 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         TextAlign::Left,
         theme.semantic.warning,
     );
-    canvas.set_string(12, 25, 34, "✖ 危险", TextAlign::Left, theme.semantic.danger);
-    canvas.set_string(13, 25, 34, " 火焰", TextAlign::Left, theme.semantic.fire);
-    canvas.set_string(9, 34, 45, " 毒素", TextAlign::Left, theme.semantic.toxic);
-    canvas.set_string(10, 34, 45, "◈ 灵能", TextAlign::Left, theme.semantic.psi);
-    canvas.set_string(11, 34, 45, "★ 稀有", TextAlign::Left, theme.semantic.rare);
-    canvas.set_string(
+    canvas.set_line(12, 25, 34, "✖ 危险", TextAlign::Left, theme.semantic.danger);
+    canvas.set_line(13, 25, 34, " 火焰", TextAlign::Left, theme.semantic.fire);
+    canvas.set_line(9, 34, 45, " 毒素", TextAlign::Left, theme.semantic.toxic);
+    canvas.set_line(10, 34, 45, "◈ 灵能", TextAlign::Left, theme.semantic.psi);
+    canvas.set_line(11, 34, 45, "★ 稀有", TextAlign::Left, theme.semantic.rare);
+    canvas.set_line(
         12,
         34,
         45,
@@ -111,7 +111,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
     );
 
     // 稀有度演示
-    canvas.set_string(
+    canvas.set_line(
         7,
         50,
         70,
@@ -120,7 +120,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         theme.earth.bone_parchment,
     );
     canvas.fill_rect_with_bg(50, 9, 20, 1, ' ', theme.rarity.common, theme.bg.basalt_blue);
-    canvas.set_string(9, 51, 71, "普通", TextAlign::Left, theme.rarity.common);
+    canvas.set_line(9, 51, 71, "普通", TextAlign::Left, theme.rarity.common);
     canvas.fill_rect_with_bg(
         50,
         10,
@@ -130,11 +130,11 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         theme.rarity.uncommon,
         theme.bg.basalt_blue,
     );
-    canvas.set_string(10, 51, 71, "罕见", TextAlign::Left, theme.rarity.uncommon);
+    canvas.set_line(10, 51, 71, "罕见", TextAlign::Left, theme.rarity.uncommon);
     canvas.fill_rect_with_bg(50, 11, 20, 1, ' ', theme.rarity.rare, theme.bg.basalt_blue);
-    canvas.set_string(11, 51, 71, "稀有", TextAlign::Left, theme.rarity.rare);
+    canvas.set_line(11, 51, 71, "稀有", TextAlign::Left, theme.rarity.rare);
     canvas.fill_rect_with_bg(50, 12, 20, 1, ' ', theme.rarity.epic, theme.bg.basalt_blue);
-    canvas.set_string(12, 51, 71, "史诗", TextAlign::Left, theme.rarity.epic);
+    canvas.set_line(12, 51, 71, "史诗", TextAlign::Left, theme.rarity.epic);
     canvas.fill_rect_with_bg(
         50,
         13,
@@ -144,7 +144,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         theme.rarity.legendary,
         theme.bg.basalt_blue,
     );
-    canvas.set_string(13, 51, 71, "传说", TextAlign::Left, theme.rarity.legendary);
+    canvas.set_line(13, 51, 71, "传说", TextAlign::Left, theme.rarity.legendary);
     canvas.fill_rect_with_bg(
         50,
         14,
@@ -154,10 +154,10 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         theme.rarity.artifact,
         theme.bg.basalt_blue,
     );
-    canvas.set_string(14, 51, 71, "神器", TextAlign::Left, theme.rarity.artifact);
+    canvas.set_line(14, 51, 71, "神器", TextAlign::Left, theme.rarity.artifact);
 
     // 灰度梯度演示
-    canvas.set_string(
+    canvas.set_line(
         16,
         2,
         40,
@@ -186,7 +186,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
     }
 
     // 背景色演示
-    canvas.set_string(
+    canvas.set_line(
         21,
         2,
         25,
@@ -195,10 +195,10 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         theme.text.primary,
     );
     canvas.fill_rect_with_bg(2, 23, 15, 3, ' ', theme.text.primary, theme.bg.void_ink);
-    canvas.set_string(24, 3, 18, "主背景", TextAlign::Center, theme.text.primary);
+    canvas.set_line(24, 3, 18, "主背景", TextAlign::Center, theme.text.primary);
 
     canvas.fill_rect_with_bg(18, 23, 15, 3, ' ', theme.text.primary, theme.bg.basalt_blue);
-    canvas.set_string(24, 19, 33, "面板底", TextAlign::Center, theme.text.primary);
+    canvas.set_line(24, 19, 33, "面板底", TextAlign::Center, theme.text.primary);
 
     canvas.fill_rect_with_bg(
         34,
@@ -209,7 +209,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         theme.text.primary,
         theme.bg.obsidian_moss,
     );
-    canvas.set_string(
+    canvas.set_line(
         24,
         35,
         49,
@@ -219,7 +219,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
     );
 
     // 文字层次演示
-    canvas.set_string(
+    canvas.set_line(
         28,
         2,
         22,
@@ -227,13 +227,13 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         TextAlign::Left,
         theme.text.primary,
     );
-    canvas.set_string(30, 2, 20, "主要文字", TextAlign::Left, theme.text.primary);
-    canvas.set_string(31, 2, 20, "次要文字", TextAlign::Left, theme.text.secondary);
-    canvas.set_string(32, 2, 20, "静默文字", TextAlign::Left, theme.text.muted);
-    canvas.set_string(33, 2, 20, "禁用文字", TextAlign::Left, theme.text.disabled);
+    canvas.set_line(30, 2, 20, "主要文字", TextAlign::Left, theme.text.primary);
+    canvas.set_line(31, 2, 20, "次要文字", TextAlign::Left, theme.text.secondary);
+    canvas.set_line(32, 2, 20, "静默文字", TextAlign::Left, theme.text.muted);
+    canvas.set_line(33, 2, 20, "禁用文字", TextAlign::Left, theme.text.disabled);
 
     // 实战场景示例
-    canvas.set_string(
+    canvas.set_line(
         36,
         2,
         45,
@@ -253,10 +253,10 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         theme.text.primary,
         theme.bg.obsidian_moss,
     );
-    canvas.set_string(39, 4, 20, "物品栏", TextAlign::Left, theme.text.primary);
+    canvas.set_line(39, 4, 20, "物品栏", TextAlign::Left, theme.text.primary);
 
     // 物品列表
-    canvas.set_string(
+    canvas.set_line(
         41,
         4,
         45,
@@ -264,7 +264,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         TextAlign::Left,
         theme.rarity.common,
     );
-    canvas.set_string(
+    canvas.set_line(
         42,
         4,
         45,
@@ -272,7 +272,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         TextAlign::Left,
         theme.rarity.rare,
     );
-    canvas.set_string(
+    canvas.set_line(
         43,
         4,
         45,
@@ -282,8 +282,8 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
     );
 
     // 状态提示
-    canvas.set_string(41, 25, 35, "HP:", TextAlign::Left, theme.text.secondary);
-    canvas.set_string(
+    canvas.set_line(41, 25, 35, "HP:", TextAlign::Left, theme.text.secondary);
+    canvas.set_line(
         41,
         29,
         45,
@@ -291,17 +291,17 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         TextAlign::Left,
         theme.semantic.success,
     );
-    canvas.set_string(42, 25, 35, "MP:", TextAlign::Left, theme.text.secondary);
-    canvas.set_string(42, 29, 45, "42/80", TextAlign::Left, theme.semantic.info);
-    canvas.set_string(43, 25, 35, "状态:", TextAlign::Left, theme.text.secondary);
-    canvas.set_string(43, 30, 45, "中毒", TextAlign::Left, theme.semantic.toxic);
+    canvas.set_line(42, 25, 35, "MP:", TextAlign::Left, theme.text.secondary);
+    canvas.set_line(42, 29, 45, "42/80", TextAlign::Left, theme.semantic.info);
+    canvas.set_line(43, 25, 35, "状态:", TextAlign::Left, theme.text.secondary);
+    canvas.set_line(43, 30, 45, "中毒", TextAlign::Left, theme.semantic.toxic);
 
     // 按钮
     canvas.fill_rect_with_bg(4, 44, 10, 1, ' ', theme.text.primary, theme.bg.ashen_slate);
-    canvas.set_string(44, 5, 15, "[ 使用 ]", TextAlign::Center, theme.text.primary);
+    canvas.set_line(44, 5, 15, "[ 使用 ]", TextAlign::Center, theme.text.primary);
 
     // 图标测试
-    canvas.set_string(
+    canvas.set_line(
         36,
         50,
         65,
@@ -309,7 +309,7 @@ fn demo_setup(mut commands: Commands, mut canvas: ResMut<Canvas>, theme: Res<The
         TextAlign::Left,
         theme.text.secondary,
     );
-    canvas.set_string(38, 50, 55, "   ", TextAlign::Left, theme.semantic.warning);
-    canvas.set_string(39, 50, 55, "   ", TextAlign::Left, theme.semantic.info);
-    canvas.set_string(40, 50, 55, "   ", TextAlign::Left, theme.semantic.danger);
+    canvas.set_line(38, 50, 55, "   ", TextAlign::Left, theme.semantic.warning);
+    canvas.set_line(39, 50, 55, "   ", TextAlign::Left, theme.semantic.info);
+    canvas.set_line(40, 50, 55, "   ", TextAlign::Left, theme.semantic.danger);
 }
