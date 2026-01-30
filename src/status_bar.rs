@@ -1,8 +1,11 @@
 //! 状态栏插件：画布最下方两行固定区域，包含网格开关、悬停文本滚动、设置按钮，按钮支持 hover/click 变色。
+//! 通过 CellHoverEvent / CellPressEvent / CellReleaseEvent 实现悬浮与点击。
 
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
-use crate::canvas::{Canvas, TextAlign, CANVAS_HEIGHT, CANVAS_WIDTH};
+use crate::canvas::{
+    CellHoverEvent, CellPressEvent, CellReleaseEvent, Canvas, TextAlign, CANVAS_WIDTH,
+};
+use crate::AppSet;
 
 // ==================== 常量 ====================
 
@@ -20,6 +23,12 @@ const SETTINGS_BUTTON_X: usize = 95;
 const SCROLL_PADDING_FULLWIDTH: usize = 2;
 const SCROLL_SPEED_TICK: f32 = 0.05;
 
+// ==================== 外部悬浮文本（主菜单等设置，状态栏只读，不绑定 string 事件） ====================
+
+/// 其它插件（如主菜单）设置的悬浮描述；状态栏在非自身按钮悬浮时显示此项，不读画布 string 的悬浮事件。
+#[derive(Resource, Default)]
+pub struct StatusBarExternalHoverText(pub Option<String>);
+
 // ==================== 状态栏按钮 ====================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +42,14 @@ impl StatusBarButton {
         match self {
             StatusBarButton::GridToggle => (GRID_TOGGLE_X, STATUS_ROW_BOTTOM),
             StatusBarButton::Settings => (SETTINGS_BUTTON_X, STATUS_ROW_BOTTOM),
+        }
+    }
+
+    /// 悬浮在按钮上时状态栏显示的完整描述（不依赖画布事件的 text）
+    fn hover_label(&self, grid_visible: bool) -> &'static str {
+        match self {
+            StatusBarButton::GridToggle => if grid_visible { "网格线" } else { "网格关" },
+            StatusBarButton::Settings => "设置",
         }
     }
 }
@@ -52,6 +69,7 @@ struct StatusBarState {
     /// 上一帧状态，用于仅在有变化时重绘
     prev_hovered: Option<StatusBarButton>,
     prev_pressed: Option<StatusBarButton>,
+    prev_hover_text: String,
     prev_scroll_offset: usize,
     prev_grid_visible: bool,
 }
@@ -67,6 +85,7 @@ impl Default for StatusBarState {
             scroll_timer: 0.0,
             prev_hovered: None,
             prev_pressed: None,
+            prev_hover_text: String::new(),
             prev_scroll_offset: 0,
             prev_grid_visible: false, // 与 canvas 初始 true 不同，确保首帧会重绘
         }
@@ -80,10 +99,11 @@ pub struct StatusBarPlugin;
 impl Plugin for StatusBarPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(StatusBarState::default())
+            .insert_resource(StatusBarExternalHoverText::default())
             .add_systems(
                 Update,
                 (
-                    status_bar_cursor_and_click,
+                    status_bar_cell_events.in_set(AppSet::StatusBarCell),
                     status_bar_scroll_tick,
                     status_bar_draw,
                 )
@@ -92,33 +112,9 @@ impl Plugin for StatusBarPlugin {
     }
 }
 
-// ==================== 光标转画布格子 ====================
+// ==================== 格子到状态栏按钮 ====================
 
-fn cursor_to_canvas_cell(
-    window: &Window,
-    camera: &Camera,
-    camera_transform: &GlobalTransform,
-    canvas: &Canvas,
-) -> Option<(usize, usize)> {
-    let cursor = window.cursor_position()?;
-    let world = camera.viewport_to_world_2d(camera_transform, cursor).ok()?;
-    let cell_size = canvas.cell_size();
-    let cw = CANVAS_WIDTH as f32 * cell_size;
-    let ch = CANVAS_HEIGHT as f32 * cell_size;
-    let origin_x = -cw / 2.0;
-    let origin_y = ch / 2.0;
-
-    let cell_x = ((world.x - origin_x) / cell_size).floor() as i32;
-    let cell_y = ((origin_y - world.y) / cell_size).floor() as i32;
-
-    if cell_x >= 0 && cell_x < CANVAS_WIDTH as i32 && cell_y >= 0 && cell_y < CANVAS_HEIGHT as i32 {
-        Some((cell_x as usize, cell_y as usize))
-    } else {
-        None
-    }
-}
-
-fn cell_to_button(x: usize, y: usize) -> Option<StatusBarButton> {
+fn cell_to_status_bar_button(x: usize, y: usize) -> Option<StatusBarButton> {
     if y != STATUS_ROW_BOTTOM {
         return None;
     }
@@ -131,41 +127,30 @@ fn cell_to_button(x: usize, y: usize) -> Option<StatusBarButton> {
     None
 }
 
-// ==================== 系统：光标与点击 ====================
+// ==================== 系统：响应画布格子事件（悬浮文本 + 按钮 hover/click） ====================
 
-fn status_bar_cursor_and_click(
-    window_query: Query<&Window, With<PrimaryWindow>>,
-    camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
-    canvas: Res<Canvas>,
+fn status_bar_cell_events(
     mut state: ResMut<StatusBarState>,
-    mouse_btn: Res<ButtonInput<MouseButton>>,
+    canvas: Res<Canvas>,
+    external: Res<StatusBarExternalHoverText>,
+    mut ev_hover: EventReader<CellHoverEvent>,
+    mut ev_press: EventReader<CellPressEvent>,
+    mut ev_release: EventReader<CellReleaseEvent>,
 ) {
-    let Ok(window) = window_query.single() else {
-        return;
-    };
-    let Ok((camera, camera_transform)) = camera_query.single() else {
-        return;
-    };
-
-    let (x, y) = match cursor_to_canvas_cell(window, camera, camera_transform, &canvas) {
-        Some(c) => c,
-        None => {
-            state.hovered = None;
-            if !mouse_btn.pressed(MouseButton::Left) {
-                state.pressed = None;
-            }
-            return;
-        }
-    };
-
-    state.hovered = cell_to_button(x, y);
-
-    if mouse_btn.just_pressed(MouseButton::Left) {
-        state.pressed = state.hovered;
+    for ev in ev_hover.read() {
+        state.hovered = ev.cell.and_then(|(x, y)| cell_to_status_bar_button(x, y));
+        // 只根据按钮绑定或外部设置，不绑定 string 的悬浮事件
+        state.hover_text = match state.hovered {
+            Some(btn) => btn.hover_label(canvas.grid_visible()).to_string(),
+            None => external.0.clone().unwrap_or_default(),
+        };
     }
-    if mouse_btn.just_released(MouseButton::Left) {
+    for ev in ev_press.read() {
+        state.pressed = cell_to_status_bar_button(ev.x, ev.y);
+    }
+    for ev in ev_release.read() {
         if let Some(btn) = state.pressed {
-            if state.hovered == Some(btn) {
+            if cell_to_status_bar_button(ev.x, ev.y) == Some(btn) {
                 match btn {
                     StatusBarButton::GridToggle => state.pending_grid_toggle = true,
                     StatusBarButton::Settings => {
@@ -208,6 +193,7 @@ fn status_bar_draw(
     let grid_visible = canvas.grid_visible();
     let changed = state.hovered != state.prev_hovered
         || state.pressed != state.prev_pressed
+        || state.hover_text != state.prev_hover_text
         || state.scroll_offset != state.prev_scroll_offset
         || grid_visible != state.prev_grid_visible;
     if !changed {
@@ -283,6 +269,7 @@ fn status_bar_draw(
 
     state.prev_hovered = state.hovered;
     state.prev_pressed = state.pressed;
+    state.prev_hover_text = state.hover_text.clone();
     state.prev_scroll_offset = state.scroll_offset;
     state.prev_grid_visible = canvas.grid_visible();
 }
@@ -298,9 +285,21 @@ fn scroll_text_for_display(content: &str, offset: usize, max_cells: usize) -> St
     let take = max_cells.saturating_sub(SCROLL_PADDING_FULLWIDTH * 2);
     let mut out = String::with_capacity(max_cells + 4);
     out.push_str(&pad_str);
-    for i in 0..take {
-        let idx = (offset + i) % len;
-        out.push(chars[idx]);
+    if len <= take {
+        // 内容能完整显示：只显示一次，不循环重复
+        for &c in &chars {
+            out.push(c);
+        }
+        // 右侧用空格填满
+        for _ in len..take {
+            out.push(PAD);
+        }
+    } else {
+        // 内容超出宽度：按 offset 滚动，循环显示
+        for i in 0..take {
+            let idx = (offset + i) % len;
+            out.push(chars[idx]);
+        }
     }
     out.push_str(&pad_str);
     out

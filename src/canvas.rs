@@ -1,4 +1,6 @@
-use bevy::{prelude::*, sprite::Anchor, text::Justify, window::WindowResized};
+use bevy::{
+    prelude::*, sprite::Anchor, text::Justify, window::PrimaryWindow, window::WindowResized,
+};
 use unicode_width::UnicodeWidthChar;
 
 // ==================== 常量（内部） ====================
@@ -21,10 +23,14 @@ impl Plugin for CanvasPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Canvas::new())
             .insert_resource(CanvasFonts::default())
+            .add_event::<CellHoverEvent>()
+            .add_event::<CellPressEvent>()
+            .add_event::<CellReleaseEvent>()
             .add_systems(Startup, (load_fonts, initial_resize))
             .add_systems(
                 Update,
                 (
+                    emit_canvas_cell_events,
                     check_font_loading,
                     handle_window_resize,
                     process_canvas_commands,
@@ -33,6 +39,31 @@ impl Plugin for CanvasPlugin {
                     .chain(),
             );
     }
+}
+
+// ==================== 画布格子事件（悬浮 / 点击） ====================
+
+/// 悬浮的格子变化时发送：移入某格带文本，或移出（cell 为 None）
+#[derive(Event, Message, Debug, Clone)]
+pub struct CellHoverEvent {
+    pub cell: Option<(usize, usize)>,
+    pub text: Option<String>,
+}
+
+/// 在格子上按下鼠标时发送
+#[derive(Event, Message, Debug, Clone)]
+pub struct CellPressEvent {
+    pub x: usize,
+    pub y: usize,
+    pub text: Option<String>,
+}
+
+/// 在格子上释放鼠标时发送
+#[derive(Event, Message, Debug, Clone)]
+pub struct CellReleaseEvent {
+    pub x: usize,
+    pub y: usize,
+    pub text: Option<String>,
 }
 
 // ==================== 公共类型 ====================
@@ -464,6 +495,52 @@ impl Canvas {
         }
     }
 
+    /// 获取 (x,y) 所在区域对应的完整文本：若为 string 则整段，若为单字则一字，空/SVG 返回 None
+    pub fn get_region_text(&self, x: usize, y: usize) -> Option<String> {
+        if x >= CANVAS_WIDTH || y >= CANVAS_HEIGHT {
+            return None;
+        }
+        let row = &self.cells[y];
+        let cell = &row[x];
+        match &cell.content {
+            CellContent::Empty => None,
+            CellContent::Svg(s) => Some(s.clone()),
+            CellContent::Continuation => {
+                let start_x = (0..=x).rev().find(|&sx| row[sx].span > 0)?;
+                let start_cell = &row[start_x];
+                let span = start_cell.span;
+                let mut s = String::with_capacity(span);
+                for i in 0..span {
+                    let cx = start_x + i;
+                    if cx >= CANVAS_WIDTH {
+                        break;
+                    }
+                    if let CellContent::Char(ch) = row[cx].content {
+                        s.push(ch);
+                    }
+                }
+                Some(s)
+            }
+            CellContent::Char(ch) => {
+                if cell.span > 0 {
+                    let mut s = String::with_capacity(cell.span);
+                    for i in 0..cell.span {
+                        let cx = x + i;
+                        if cx >= CANVAS_WIDTH {
+                            break;
+                        }
+                        if let CellContent::Char(c) = row[cx].content {
+                            s.push(c);
+                        }
+                    }
+                    Some(s)
+                } else {
+                    Some(ch.to_string())
+                }
+            }
+        }
+    }
+
     /// 清除整个画布
     pub fn clear(&mut self) {
         for row in &mut self.cells {
@@ -730,6 +807,82 @@ fn process_canvas_commands(
 }
 
 // ==================== 系统函数（内部） ====================
+
+fn cursor_to_canvas_cell(
+    window: &Window,
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    canvas: &Canvas,
+) -> Option<(usize, usize)> {
+    let cursor = window.cursor_position()?;
+    let world = camera.viewport_to_world_2d(camera_transform, cursor).ok()?;
+    let cell_size = canvas.cell_size();
+    let cw = CANVAS_WIDTH as f32 * cell_size;
+    let ch = CANVAS_HEIGHT as f32 * cell_size;
+    let origin_x = -cw / 2.0;
+    let origin_y = ch / 2.0;
+
+    let cell_x = ((world.x - origin_x) / cell_size).floor() as i32;
+    let cell_y = ((origin_y - world.y) / cell_size).floor() as i32;
+
+    if cell_x >= 0 && cell_x < CANVAS_WIDTH as i32 && cell_y >= 0 && cell_y < CANVAS_HEIGHT as i32 {
+        Some((cell_x as usize, cell_y as usize))
+    } else {
+        None
+    }
+}
+
+/// 每帧根据光标位置发送 CellHoverEvent；按下/释放时发送 CellPressEvent / CellReleaseEvent
+fn emit_canvas_cell_events(
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
+    canvas: Res<Canvas>,
+    mouse_btn: Res<ButtonInput<MouseButton>>,
+    mut ev_hover: EventWriter<CellHoverEvent>,
+    mut ev_press: EventWriter<CellPressEvent>,
+    mut ev_release: EventWriter<CellReleaseEvent>,
+    mut prev_cell: Local<Option<(usize, usize)>>,
+) {
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = camera_query.single() else {
+        return;
+    };
+
+    let current_cell = cursor_to_canvas_cell(window, camera, camera_transform, &canvas);
+    let (text, cell_for_events) = match current_cell.as_ref() {
+        Some(&(x, y)) => (canvas.get_region_text(x, y), Some((x, y))),
+        None => (None, None),
+    };
+
+    if *prev_cell != cell_for_events {
+        ev_hover.write(CellHoverEvent {
+            cell: cell_for_events,
+            text: text.clone(),
+        });
+        *prev_cell = cell_for_events;
+    }
+
+    if mouse_btn.just_pressed(MouseButton::Left) {
+        if let Some((x, y)) = current_cell {
+            ev_press.write(CellPressEvent {
+                x,
+                y,
+                text: canvas.get_region_text(x, y),
+            });
+        }
+    }
+    if mouse_btn.just_released(MouseButton::Left) {
+        if let Some((x, y)) = current_cell {
+            ev_release.write(CellReleaseEvent {
+                x,
+                y,
+                text: canvas.get_region_text(x, y),
+            });
+        }
+    }
+}
 
 // 初始化时计算正确的缩放
 fn initial_resize(mut canvas: ResMut<Canvas>, window_query: Query<&Window>) {
