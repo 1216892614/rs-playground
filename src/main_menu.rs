@@ -100,6 +100,8 @@ struct MainMenuState {
     pressed: Option<MainMenuButton>,
     prev_hovered: Option<MainMenuButton>,
     prev_pressed: Option<MainMenuButton>,
+    /// 上一帧的应用状态，用于检测“刚进入主菜单”以触发重绘
+    prev_app_state: Option<AppState>,
 }
 
 impl Default for MainMenuState {
@@ -109,6 +111,7 @@ impl Default for MainMenuState {
             pressed: None,
             prev_hovered: Some(MainMenuButton::Start), // 与 None 不同，确保首帧重绘
             prev_pressed: None,
+            prev_app_state: None,
         }
     }
 }
@@ -152,6 +155,7 @@ fn main_menu_cell_events(
     mut ev_press: EventReader<CellPressEvent>,
     mut ev_release: EventReader<CellReleaseEvent>,
     mut app_exit: EventWriter<AppExit>,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
     if *app_state.get() != AppState::MainMenu {
         return;
@@ -169,7 +173,7 @@ fn main_menu_cell_events(
             if cell_to_main_menu_button(ev.x, ev.y) == Some(btn) {
                 match btn {
                     MainMenuButton::Start => {
-                        // TODO: 开始游戏
+                        next_state.set(AppState::SaveLoad);
                     }
                     MainMenuButton::Settings => {
                         // TODO: 打开设置
@@ -195,10 +199,17 @@ fn main_menu_draw(
     mut state: ResMut<MainMenuState>,
     theme: Res<crate::theme::Theme>,
 ) {
-    if *app_state.get() != AppState::MainMenu {
+    let current = app_state.get().clone();
+    if current != AppState::MainMenu {
+        state.prev_app_state = Some(current);
         return;
     }
-    let changed = state.hovered != state.prev_hovered || state.pressed != state.prev_pressed;
+    // 刚进入主菜单（例如从像素编辑器返回）时也必须重绘
+    let just_entered = state.prev_app_state != Some(AppState::MainMenu);
+    state.prev_app_state = Some(AppState::MainMenu);
+    let changed = just_entered
+        || state.hovered != state.prev_hovered
+        || state.pressed != state.prev_pressed;
     if !changed {
         return;
     }

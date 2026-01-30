@@ -1,6 +1,7 @@
 use bevy::{
     prelude::*, sprite::Anchor, text::Justify, window::PrimaryWindow, window::WindowResized,
 };
+use std::collections::BTreeMap;
 use unicode_width::UnicodeWidthChar;
 
 // ==================== 常量（内部） ====================
@@ -78,7 +79,7 @@ pub enum TextAlign {
 
 // ==================== 内部数据结构 ====================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum CellContent {
     Empty,
     Char(char),
@@ -88,7 +89,7 @@ enum CellContent {
     Svg(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Cell {
     content: CellContent,
     // 连写范围：>0 表示从当前格开始的连写字符串占用的格子数
@@ -116,25 +117,56 @@ impl Default for Cell {
 
 // ==================== 公共 Canvas Resource ====================
 
+/// 默认图层编号，未指定时使用
+pub const DEFAULT_LAYER: i32 = 0;
+
+fn default_layer_grid() -> Vec<Vec<Cell>> {
+    vec![vec![Cell::default(); CANVAS_WIDTH]; CANVAS_HEIGHT]
+}
+
 #[derive(Resource)]
 pub struct Canvas {
-    cells: Vec<Vec<Cell>>,
+    /// 图层：i32 为高度（层号），数值大的在上方；每层为 96×54 的 cell 网格
+    layers: BTreeMap<i32, Vec<Vec<Cell>>>,
     cell_size: f32,
     scale: f32,
     dirty: bool,
-    /// 是否绘制网格线（可由状态栏开关控制）
     grid_visible: bool,
 }
 
 impl Canvas {
     pub fn new() -> Self {
-        let cells = vec![vec![Cell::default(); CANVAS_WIDTH]; CANVAS_HEIGHT];
+        let mut layers = BTreeMap::new();
+        layers.insert(DEFAULT_LAYER, default_layer_grid());
         Self {
-            cells,
+            layers,
             cell_size: BASE_CELL_SIZE,
             scale: 1.0,
             dirty: true,
             grid_visible: true,
+        }
+    }
+
+    /// 获取或创建指定图层（可写）
+    fn get_layer_mut(&mut self, layer: i32) -> &mut Vec<Vec<Cell>> {
+        self.layers
+            .entry(layer)
+            .or_insert_with(default_layer_grid)
+    }
+
+    /// 获取指定图层（只读），不存在返回 None
+    fn get_layer(&self, layer: i32) -> Option<&Vec<Vec<Cell>>> {
+        self.layers.get(&layer)
+    }
+
+    /// 判断背景色是否视为透明（None 或 alpha 接近 0）
+    fn is_bg_transparent(c: Option<Color>) -> bool {
+        match c {
+            None => true,
+            Some(color) => {
+                let a = color.alpha();
+                a < 0.01
+            }
         }
     }
 
@@ -161,13 +193,19 @@ impl Canvas {
         self.dirty = true;
     }
 
-    /// 清除范围内所有 string/char 内容，保留背景色；并清除与该范围相交的 string 整段
-    fn clear_range_string_content(&mut self, y: usize, start: usize, end: usize) {
+    /// 清除指定图层范围内所有 string/char 内容，保留背景色；并清除与该范围相交的 string 整段
+    fn clear_range_string_content_layer(
+        &mut self,
+        layer: i32,
+        y: usize,
+        start: usize,
+        end: usize,
+    ) {
         if y >= CANVAS_HEIGHT || start >= end {
             return;
         }
         let end = end.min(CANVAS_WIDTH);
-        let row = &mut self.cells[y];
+        let row = &mut self.get_layer_mut(layer)[y];
 
         let clear_cell_content = |cell: &mut Cell| {
             let bg = cell.background_color;
@@ -215,18 +253,28 @@ impl Canvas {
 
     // ==================== 公共绘制 API ====================
 
-    /// 设置单个字符（自动处理全角字符占位）
+    /// 设置单个字符（自动处理全角字符占位），默认图层 0
     pub fn set_char(&mut self, x: usize, y: usize, ch: char, color: Color) {
+        self.set_char_layer(DEFAULT_LAYER, x, y, ch, color);
+    }
+
+    /// 在指定图层设置单个字符
+    pub fn set_char_layer(
+        &mut self,
+        layer: i32,
+        x: usize,
+        y: usize,
+        ch: char,
+        color: Color,
+    ) {
         if x >= CANVAS_WIDTH || y >= CANVAS_HEIGHT {
             return;
         }
-
         let width = ch.width().unwrap_or(1);
         let clear_end = (x + width).min(CANVAS_WIDTH);
-        self.clear_range_string_content(y, x, clear_end);
-
-        // 设置主字符
-        self.cells[y][x] = Cell {
+        self.clear_range_string_content_layer(layer, y, x, clear_end);
+        let cells = self.get_layer_mut(layer);
+        cells[y][x] = Cell {
             content: CellContent::Char(ch),
             span: 0,
             color,
@@ -236,7 +284,7 @@ impl Canvas {
         };
 
         if width == 2 && x + 1 < CANVAS_WIDTH {
-            self.cells[y][x + 1] = Cell {
+            cells[y][x + 1] = Cell {
                 content: CellContent::Continuation,
                 span: 0,
                 color,
@@ -245,13 +293,25 @@ impl Canvas {
                 container_align: None,
             };
         }
-
         self.mark_dirty();
     }
 
-    /// 设置单个字符（带背景色，永远不连写）
+    /// 设置单个字符（带背景色），默认图层 0
     pub fn set_char_with_bg(
         &mut self,
+        x: usize,
+        y: usize,
+        ch: char,
+        color: Color,
+        bg_color: Color,
+    ) {
+        self.set_char_with_bg_layer(DEFAULT_LAYER, x, y, ch, color, bg_color);
+    }
+
+    /// 在指定图层设置单个字符（带背景色）
+    pub fn set_char_with_bg_layer(
+        &mut self,
+        layer: i32,
         x: usize,
         y: usize,
         ch: char,
@@ -261,13 +321,11 @@ impl Canvas {
         if x >= CANVAS_WIDTH || y >= CANVAS_HEIGHT {
             return;
         }
-
         let width = ch.width().unwrap_or(1);
         let clear_end = (x + width).min(CANVAS_WIDTH);
-        self.clear_range_string_content(y, x, clear_end);
-
-        // 设置主字符
-        self.cells[y][x] = Cell {
+        self.clear_range_string_content_layer(layer, y, x, clear_end);
+        let cells = self.get_layer_mut(layer);
+        cells[y][x] = Cell {
             content: CellContent::Char(ch),
             span: 0,
             color,
@@ -275,9 +333,8 @@ impl Canvas {
             container_end: None,
             container_align: None,
         };
-
         if width == 2 && x + 1 < CANVAS_WIDTH {
-            self.cells[y][x + 1] = Cell {
+            cells[y][x + 1] = Cell {
                 content: CellContent::Continuation,
                 span: 0,
                 color,
@@ -286,13 +343,26 @@ impl Canvas {
                 container_align: None,
             };
         }
-
         self.mark_dirty();
     }
 
-    /// 设置单行文本（在指定范围内连写渲染，支持对齐和省略；后续可扩展为多行）
+    /// 设置单行文本，默认图层 0
     pub fn set_line(
         &mut self,
+        y: usize,
+        x_start: usize,
+        x_end: usize,
+        text: &str,
+        align: TextAlign,
+        color: Color,
+    ) {
+        self.set_line_layer(DEFAULT_LAYER, y, x_start, x_end, text, align, color);
+    }
+
+    /// 在指定图层设置单行文本
+    pub fn set_line_layer(
+        &mut self,
+        layer: i32,
         y: usize,
         x_start: usize,
         x_end: usize,
@@ -303,32 +373,26 @@ impl Canvas {
         if y >= CANVAS_HEIGHT || x_start >= x_end || x_start >= CANVAS_WIDTH {
             return;
         }
-
         let x_end = x_end.min(CANVAS_WIDTH);
         let available_width = x_end - x_start;
-
-        self.clear_range_string_content(y, x_start, x_end);
-
+        self.clear_range_string_content_layer(layer, y, x_start, x_end);
         let (final_text, text_width) = Self::fit_text_with_ellipsis(text, available_width);
-
         if final_text.is_empty() {
             self.mark_dirty();
             return;
         }
-
         let actual_x = match align {
             TextAlign::Left => x_start,
             TextAlign::Center => x_start + (available_width.saturating_sub(text_width)) / 2,
             TextAlign::Right => x_start + available_width.saturating_sub(text_width),
         };
-
         let char_count = final_text.chars().count();
         if char_count == 0 {
             self.mark_dirty();
             return;
         }
-
-        self.cells[y][actual_x] = Cell {
+        let cells = self.get_layer_mut(layer);
+        cells[y][actual_x] = Cell {
             content: CellContent::Char(final_text.chars().next().unwrap()),
             span: text_width,
             color,
@@ -336,11 +400,10 @@ impl Canvas {
             container_end: Some(x_end),
             container_align: Some(align),
         };
-
         for (i, ch) in final_text.chars().enumerate().skip(1) {
             let cell_x = actual_x + i;
             if cell_x < x_end && cell_x < CANVAS_WIDTH {
-                self.cells[y][cell_x] = Cell {
+                cells[y][cell_x] = Cell {
                     content: CellContent::Char(ch),
                     span: 0,
                     color,
@@ -350,11 +413,10 @@ impl Canvas {
                 };
             }
         }
-
         self.mark_dirty();
     }
 
-    /// 设置单行文本（带背景色）
+    /// 设置单行文本（带背景色），默认图层 0
     pub fn set_line_with_bg(
         &mut self,
         y: usize,
@@ -365,41 +427,49 @@ impl Canvas {
         color: Color,
         bg_color: Color,
     ) {
+        self.set_line_with_bg_layer(DEFAULT_LAYER, y, x_start, x_end, text, align, color, bg_color);
+    }
+
+    /// 在指定图层设置单行文本（带背景色）
+    pub fn set_line_with_bg_layer(
+        &mut self,
+        layer: i32,
+        y: usize,
+        x_start: usize,
+        x_end: usize,
+        text: &str,
+        align: TextAlign,
+        color: Color,
+        bg_color: Color,
+    ) {
         if y >= CANVAS_HEIGHT || x_start >= x_end || x_start >= CANVAS_WIDTH {
             return;
         }
-
         let x_end = x_end.min(CANVAS_WIDTH);
         let available_width = x_end - x_start;
-
-        self.clear_range_string_content(y, x_start, x_end);
-
+        self.clear_range_string_content_layer(layer, y, x_start, x_end);
+        let cells = self.get_layer_mut(layer);
         for x in x_start..x_end {
-            if self.cells[y][x].background_color.is_none() {
-                self.cells[y][x].background_color = Some(bg_color);
+            if cells[y][x].background_color.is_none() {
+                cells[y][x].background_color = Some(bg_color);
             }
         }
-
         let (final_text, text_width) = Self::fit_text_with_ellipsis(text, available_width);
-
         if final_text.is_empty() {
             self.mark_dirty();
             return;
         }
-
         let actual_x = match align {
             TextAlign::Left => x_start,
             TextAlign::Center => x_start + (available_width.saturating_sub(text_width)) / 2,
             TextAlign::Right => x_start + available_width.saturating_sub(text_width),
         };
-
         let char_count = final_text.chars().count();
         if char_count == 0 {
             self.mark_dirty();
             return;
         }
-
-        self.cells[y][actual_x] = Cell {
+        cells[y][actual_x] = Cell {
             content: CellContent::Char(final_text.chars().next().unwrap()),
             span: text_width,
             color,
@@ -407,11 +477,10 @@ impl Canvas {
             container_end: Some(x_end),
             container_align: Some(align),
         };
-
         for (i, ch) in final_text.chars().enumerate().skip(1) {
             let cell_x = actual_x + i;
             if cell_x < x_end && cell_x < CANVAS_WIDTH {
-                self.cells[y][cell_x] = Cell {
+                cells[y][cell_x] = Cell {
                     content: CellContent::Char(ch),
                     span: 0,
                     color,
@@ -421,7 +490,6 @@ impl Canvas {
                 };
             }
         }
-
         self.mark_dirty();
     }
 
@@ -463,9 +531,22 @@ impl Canvas {
     }
 
     /// 设置 SVG
+    /// 设置 SVG，默认图层 0
     pub fn set_svg(&mut self, x: usize, y: usize, svg_id: &str, color: Color) {
+        self.set_svg_layer(DEFAULT_LAYER, x, y, svg_id, color);
+    }
+
+    pub fn set_svg_layer(
+        &mut self,
+        layer: i32,
+        x: usize,
+        y: usize,
+        svg_id: &str,
+        color: Color,
+    ) {
         if x < CANVAS_WIDTH && y < CANVAS_HEIGHT {
-            self.cells[y][x] = Cell {
+            let cells = self.get_layer_mut(layer);
+            cells[y][x] = Cell {
                 content: CellContent::Svg(svg_id.to_string()),
                 span: 1,
                 color,
@@ -477,94 +558,138 @@ impl Canvas {
         }
     }
 
-    /// 设置单元格背景色
+    /// 设置单元格背景色，默认图层 0
     #[allow(dead_code)]
     pub fn set_background(&mut self, x: usize, y: usize, bg_color: Color) {
+        self.set_background_layer(DEFAULT_LAYER, x, y, bg_color);
+    }
+
+    #[allow(dead_code)]
+    pub fn set_background_layer(&mut self, layer: i32, x: usize, y: usize, bg_color: Color) {
         if x < CANVAS_WIDTH && y < CANVAS_HEIGHT {
-            self.cells[y][x].background_color = Some(bg_color);
+            let cells = self.get_layer_mut(layer);
+            cells[y][x].background_color = Some(bg_color);
             self.mark_dirty();
         }
     }
 
-    /// 清除单元格背景色
+    /// 清除单元格背景色，默认图层 0
     #[allow(dead_code)]
     pub fn clear_background(&mut self, x: usize, y: usize) {
+        self.clear_background_layer(DEFAULT_LAYER, x, y);
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_background_layer(&mut self, layer: i32, x: usize, y: usize) {
         if x < CANVAS_WIDTH && y < CANVAS_HEIGHT {
-            self.cells[y][x].background_color = None;
+            let cells = self.get_layer_mut(layer);
+            cells[y][x].background_color = None;
             self.mark_dirty();
         }
     }
 
-    /// 获取 (x,y) 所在区域对应的完整文本：若为 string 则整段，若为单字则一字，空/SVG 返回 None
+    /// 获取 (x,y) 处完整文本：从最上方图层起找，若为 string 则整段，单字则一字，空/SVG 返回 None
     pub fn get_region_text(&self, x: usize, y: usize) -> Option<String> {
         if x >= CANVAS_WIDTH || y >= CANVAS_HEIGHT {
             return None;
         }
-        let row = &self.cells[y];
-        let cell = &row[x];
-        match &cell.content {
-            CellContent::Empty => None,
-            CellContent::Svg(s) => Some(s.clone()),
-            CellContent::Continuation => {
-                let start_x = (0..=x).rev().find(|&sx| row[sx].span > 0)?;
-                let start_cell = &row[start_x];
-                let span = start_cell.span;
-                let mut s = String::with_capacity(span);
-                for i in 0..span {
-                    let cx = start_x + i;
-                    if cx >= CANVAS_WIDTH {
-                        break;
-                    }
-                    if let CellContent::Char(ch) = row[cx].content {
-                        s.push(ch);
-                    }
-                }
-                Some(s)
-            }
-            CellContent::Char(ch) => {
-                if cell.span > 0 {
-                    let mut s = String::with_capacity(cell.span);
-                    for i in 0..cell.span {
-                        let cx = x + i;
+        for (_layer, grid) in self.layers.iter().rev() {
+            let row = &grid[y];
+            let cell = &row[x];
+            let out = match &cell.content {
+                CellContent::Empty => None,
+                CellContent::Svg(s) => Some(s.clone()),
+                CellContent::Continuation => {
+                    let start_x = (0..=x).rev().find(|&sx| row[sx].span > 0)?;
+                    let start_cell = &row[start_x];
+                    let span = start_cell.span;
+                    let mut s = String::with_capacity(span);
+                    for i in 0..span {
+                        let cx = start_x + i;
                         if cx >= CANVAS_WIDTH {
                             break;
                         }
-                        if let CellContent::Char(c) = row[cx].content {
-                            s.push(c);
+                        if let CellContent::Char(ch) = row[cx].content {
+                            s.push(ch);
                         }
                     }
                     Some(s)
-                } else {
-                    Some(ch.to_string())
+                }
+                CellContent::Char(ch) => {
+                    if cell.span > 0 {
+                        let mut s = String::with_capacity(cell.span);
+                        for i in 0..cell.span {
+                            let cx = x + i;
+                            if cx >= CANVAS_WIDTH {
+                                break;
+                            }
+                            if let CellContent::Char(c) = row[cx].content {
+                                s.push(c);
+                            }
+                        }
+                        Some(s)
+                    } else {
+                        Some(ch.to_string())
+                    }
+                }
+            };
+            if out.is_some() {
+                return out;
+            }
+        }
+        None
+    }
+
+    /// 清除整个画布（所有图层）
+    pub fn clear(&mut self) {
+        for grid in self.layers.values_mut() {
+            for row in grid.iter_mut() {
+                for cell in row.iter_mut() {
+                    *cell = Cell::default();
                 }
             }
         }
-    }
-
-    /// 清除整个画布
-    pub fn clear(&mut self) {
-        for row in &mut self.cells {
-            for cell in row {
-                *cell = Cell::default();
-            }
-        }
         self.mark_dirty();
     }
 
-    /// 清除矩形区域
+    /// 清除指定图层的整个网格
+    pub fn clear_layer(&mut self, layer: i32) {
+        if let Some(grid) = self.layers.get_mut(&layer) {
+            for row in grid.iter_mut() {
+                for cell in row.iter_mut() {
+                    *cell = Cell::default();
+                }
+            }
+            self.mark_dirty();
+        }
+    }
+
+    /// 清除矩形区域，默认图层 0
     pub fn clear_rect(&mut self, x: usize, y: usize, width: usize, height: usize) {
+        self.clear_rect_layer(DEFAULT_LAYER, x, y, width, height);
+    }
+
+    /// 清除指定图层的矩形区域
+    pub fn clear_rect_layer(
+        &mut self,
+        layer: i32,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+    ) {
         let end_x = (x + width).min(CANVAS_WIDTH);
         let end_y = (y + height).min(CANVAS_HEIGHT);
-
+        let cells = self.get_layer_mut(layer);
         for row in y..end_y {
             for col in x..end_x {
-                self.cells[row][col] = Cell::default();
+                cells[row][col] = Cell::default();
             }
         }
         self.mark_dirty();
     }
 
-    /// 填充矩形区域
+    /// 填充矩形区域，默认图层 0
     pub fn fill_rect(
         &mut self,
         x: usize,
@@ -574,12 +699,25 @@ impl Canvas {
         ch: char,
         color: Color,
     ) {
+        self.fill_rect_layer(DEFAULT_LAYER, x, y, width, height, ch, color);
+    }
+
+    pub fn fill_rect_layer(
+        &mut self,
+        layer: i32,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        ch: char,
+        color: Color,
+    ) {
         let end_x = (x + width).min(CANVAS_WIDTH);
         let end_y = (y + height).min(CANVAS_HEIGHT);
-
+        let cells = self.get_layer_mut(layer);
         for row in y..end_y {
             for col in x..end_x {
-                self.cells[row][col] = Cell {
+                cells[row][col] = Cell {
                     content: CellContent::Char(ch),
                     span: 1,
                     color,
@@ -592,7 +730,7 @@ impl Canvas {
         self.mark_dirty();
     }
 
-    /// 填充矩形区域（带背景色）
+    /// 填充矩形区域（带背景色），默认图层 0
     pub fn fill_rect_with_bg(
         &mut self,
         x: usize,
@@ -603,12 +741,28 @@ impl Canvas {
         color: Color,
         bg_color: Color,
     ) {
+        self.fill_rect_with_bg_layer(
+            DEFAULT_LAYER, x, y, width, height, ch, color, bg_color,
+        );
+    }
+
+    pub fn fill_rect_with_bg_layer(
+        &mut self,
+        layer: i32,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        ch: char,
+        color: Color,
+        bg_color: Color,
+    ) {
         let end_x = (x + width).min(CANVAS_WIDTH);
         let end_y = (y + height).min(CANVAS_HEIGHT);
-
+        let cells = self.get_layer_mut(layer);
         for row in y..end_y {
             for col in x..end_x {
-                self.cells[row][col] = Cell {
+                cells[row][col] = Cell {
                     content: CellContent::Char(ch),
                     span: 1,
                     color,
@@ -621,7 +775,7 @@ impl Canvas {
         self.mark_dirty();
     }
 
-    /// 填充矩形背景（不改变内容）
+    /// 填充矩形背景（不改变内容），默认图层 0
     pub fn fill_background_rect(
         &mut self,
         x: usize,
@@ -630,12 +784,24 @@ impl Canvas {
         height: usize,
         bg_color: Color,
     ) {
+        self.fill_background_rect_layer(DEFAULT_LAYER, x, y, width, height, bg_color);
+    }
+
+    pub fn fill_background_rect_layer(
+        &mut self,
+        layer: i32,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        bg_color: Color,
+    ) {
         let end_x = (x + width).min(CANVAS_WIDTH);
         let end_y = (y + height).min(CANVAS_HEIGHT);
-
+        let cells = self.get_layer_mut(layer);
         for row in y..end_y {
             for col in x..end_x {
-                self.cells[row][col].background_color = Some(bg_color);
+                cells[row][col].background_color = Some(bg_color);
             }
         }
         self.mark_dirty();
@@ -954,6 +1120,90 @@ fn handle_window_resize(
     }
 }
 
+/// 从所有图层合成背景：从低到高，上方非透明背景覆盖下方
+fn composite_background(canvas: &Canvas) -> Vec<Vec<Option<Color>>> {
+    let mut out = vec![vec![None; CANVAS_WIDTH]; CANVAS_HEIGHT];
+    for (_layer_id, grid) in canvas.layers.iter() {
+        for (y, row) in grid.iter().enumerate() {
+            for (x, cell) in row.iter().enumerate() {
+                if let Some(bg) = cell.background_color {
+                    if !Canvas::is_bg_transparent(Some(bg)) {
+                        out[y][x] = Some(bg);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 从所有图层合成内容：每个 (x,y) 只显示最上方图层的字符/字符串
+fn composite_content(canvas: &Canvas) -> Vec<Vec<Cell>> {
+    let mut out = vec![vec![Cell::default(); CANVAS_WIDTH]; CANVAS_HEIGHT];
+    for (y, row) in out.iter_mut().enumerate() {
+        let mut x = 0usize;
+        while x < CANVAS_WIDTH {
+            // 已由左侧 span 填充的格子跳过
+            if row[x].content != CellContent::Empty {
+                x += 1;
+                continue;
+            }
+            let mut found: Option<(i32, usize, &Cell)> = None;
+            for (_layer_id, grid) in canvas.layers.iter().rev() {
+                if y >= grid.len() || x >= grid[y].len() {
+                    continue;
+                }
+                let c = &grid[y][x];
+                match &c.content {
+                    CellContent::Empty => continue,
+                    CellContent::Continuation => {
+                        let start = find_span_start(grid, y, x);
+                        if let Some(sx) = start {
+                            found = Some((*_layer_id, sx, &grid[y][sx]));
+                        }
+                        break;
+                    }
+                    CellContent::Char(_) | CellContent::Svg(_) => {
+                        found = Some((*_layer_id, x, c));
+                        break;
+                    }
+                }
+            }
+            if let Some((_layer_id, start_x, start_cell)) = found {
+                let span = if start_cell.span > 0 {
+                    start_cell.span
+                } else {
+                    1
+                };
+                let end_x = (start_x + span).min(CANVAS_WIDTH);
+                if let Some(grid) = canvas.layers.get(&_layer_id) {
+                    for i in start_x..end_x {
+                        if i < grid[y].len() {
+                            row[i] = grid[y][i].clone();
+                        }
+                    }
+                }
+                x = end_x;
+            } else {
+                x += 1;
+            }
+        }
+    }
+    out
+}
+
+fn find_span_start(grid: &[Vec<Cell>], y: usize, mut x: usize) -> Option<usize> {
+    while x > 0 {
+        x -= 1;
+        match &grid[y][x].content {
+            CellContent::Char(_) => return Some(x),
+            CellContent::Continuation => continue,
+            _ => break,
+        }
+    }
+    None
+}
+
 fn render_canvas(
     mut commands: Commands,
     mut canvas: ResMut<Canvas>,
@@ -980,35 +1230,40 @@ fn render_canvas(
     let origin_x = -canvas_width / 2.0;
     let origin_y = canvas_height / 2.0;
 
+    let composite_bg = composite_background(&canvas);
+    let composite_content = composite_content(&canvas);
+
     // 第一遍：渲染背景（string 的容器整块绘制，其余按格绘制）
-    for (y, row) in canvas.cells.iter().enumerate() {
+    for (y, row) in composite_content.iter().enumerate() {
         let mut x = 0;
         while x < row.len() {
             let cell = &row[x];
-            if let Some(bg_color) = cell.background_color {
-                if let Some(container_end) = cell.container_end {
-                    // 整块容器 [x, container_end)，屏幕上一块矩形
+            let bg_color = composite_bg[y][x];
+            if let Some(container_end) = cell.container_end {
+                if let Some(bg) = bg_color {
                     let end = container_end.min(CANVAS_WIDTH);
                     let w = (end - x) as f32 * cell_size;
                     let pos_x = origin_x + (x as f32 + end as f32) / 2.0 * cell_size;
                     let pos_y = origin_y - (y as f32 + 0.5) * cell_size;
                     commands.spawn((
                         Sprite {
-                            color: bg_color,
+                            color: bg,
                             custom_size: Some(Vec2::new(w, cell_size)),
                             ..default()
                         },
                         Transform::from_xyz(pos_x, pos_y, 0.0),
                         CanvasMarker,
                     ));
-                    x = end;
-                    continue;
                 }
+                x = container_end;
+                continue;
+            }
+            if let Some(bg) = bg_color {
                 let pos_x = origin_x + (x as f32 + 0.5) * cell_size;
                 let pos_y = origin_y - (y as f32 + 0.5) * cell_size;
                 commands.spawn((
                     Sprite {
-                        color: bg_color,
+                        color: bg,
                         custom_size: Some(Vec2::splat(cell_size)),
                         ..default()
                     },
@@ -1021,7 +1276,7 @@ fn render_canvas(
     }
 
     // 第二遍：渲染文字内容
-    for (y, row) in canvas.cells.iter().enumerate() {
+    for (y, row) in composite_content.iter().enumerate() {
         let mut x = 0;
         while x < row.len() {
             let cell = &row[x];

@@ -43,12 +43,16 @@ const BRUSH_ROW_X: usize = 38;
 const BRUSH_ITEM_WIDTH: usize = 2;
 const BRUSH_SIZES: usize = 8; // 1..=8
 
-/// 导出/导入/返回 按钮区域
+/// 导出/导入 按钮区域（左下）
 const BTN_EXPORT_Y: usize = 40;
 const BTN_IMPORT_Y: usize = 42;
-const BTN_BACK_Y: usize = 44;
 const BTN_X_START: usize = 2;
 const BTN_X_END: usize = 30;
+
+/// 右上角返回按钮（与存档界面一致）
+const BACK_BTN_Y: usize = 2;
+const BACK_BTN_X_START: usize = 92;
+const BACK_BTN_X_END: usize = 96;
 
 // ==================== 导出 JSON 格式 ====================
 
@@ -219,13 +223,15 @@ fn cell_to_brush_size(x: usize, y: usize) -> Option<usize> {
 }
 
 fn cell_to_editor_button(x: usize, y: usize) -> Option<EditorButton> {
+    if y == BACK_BTN_Y && x >= BACK_BTN_X_START && x < BACK_BTN_X_END {
+        return Some(EditorButton::Back);
+    }
     if x < BTN_X_START || x >= BTN_X_END {
         return None;
     }
     match y {
         BTN_EXPORT_Y => Some(EditorButton::Export),
         BTN_IMPORT_Y => Some(EditorButton::Import),
-        BTN_BACK_Y => Some(EditorButton::Back),
         _ => None,
     }
 }
@@ -433,6 +439,16 @@ fn pixel_editor_draw(
         TextAlign::Center,
         theme.text.primary,
     );
+    // 右上角返回
+    canvas.set_line_with_bg(
+        BACK_BTN_Y,
+        BACK_BTN_X_START,
+        BACK_BTN_X_END,
+        "返回",
+        TextAlign::Right,
+        theme.text.primary,
+        bg,
+    );
 
     // 16×16 图标区域：每个像素 2×2 cell
     for py in 0..ICON_SIZE {
@@ -574,15 +590,6 @@ fn pixel_editor_draw(
         BTN_X_START,
         BTN_X_END,
         " 导入 ",
-        TextAlign::Left,
-        theme.text.primary,
-        btn_bg,
-    );
-    canvas.set_line_with_bg(
-        BTN_BACK_Y,
-        BTN_X_START,
-        BTN_X_END,
-        " 返回 ",
         TextAlign::Left,
         theme.text.primary,
         btn_bg,

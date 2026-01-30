@@ -53,6 +53,7 @@ impl StatusBarButton {
             StatusBarButton::Left => match app_state {
                 AppState::MainMenu => "像素编辑器",
                 AppState::PixelEditor => "返回主菜单",
+                AppState::SaveLoad => "返回主菜单",
             },
             StatusBarButton::Settings => "设置",
         }
@@ -173,6 +174,7 @@ fn status_bar_cell_events(
         match app_state.get() {
             AppState::MainMenu => next_state.set(AppState::PixelEditor),
             AppState::PixelEditor => next_state.set(AppState::MainMenu),
+            AppState::SaveLoad => next_state.set(AppState::MainMenu),
         }
     }
 }
@@ -244,6 +246,7 @@ fn status_bar_draw(
     let left_label = match app_state.get() {
         AppState::MainMenu => "像",
         AppState::PixelEditor => "返",
+        AppState::SaveLoad => "返",
     };
     canvas.set_line_with_bg(
         gy,
