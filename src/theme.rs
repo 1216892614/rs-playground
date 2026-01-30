@@ -77,6 +77,59 @@ impl Default for Theme {
     }
 }
 
+/// 调色板单项：名称 + 颜色（用于像素编辑器等）
+#[derive(Debug, Clone)]
+pub struct PaletteEntry(pub &'static str, pub Color);
+
+impl Theme {
+    /// 返回主题中所有命名颜色，用于调色板（名称、颜色）
+    pub fn palette_entries(&self) -> Vec<PaletteEntry> {
+        let mut v = Vec::with_capacity(60);
+        v.push(PaletteEntry("void_ink", self.bg.void_ink));
+        v.push(PaletteEntry("basalt_blue", self.bg.basalt_blue));
+        v.push(PaletteEntry("obsidian_moss", self.bg.obsidian_moss));
+        v.push(PaletteEntry("ashen_slate", self.bg.ashen_slate));
+        v.push(PaletteEntry("ruined_umber", self.earth.ruined_umber));
+        v.push(PaletteEntry("desert_bronze", self.earth.desert_bronze));
+        v.push(PaletteEntry("silt_gold", self.earth.silt_gold));
+        v.push(PaletteEntry("sunbaked_clay", self.earth.sunbaked_clay));
+        v.push(PaletteEntry("bone_parchment", self.earth.bone_parchment));
+        v.push(PaletteEntry("primary", self.text.primary));
+        v.push(PaletteEntry("secondary", self.text.secondary));
+        v.push(PaletteEntry("muted", self.text.muted));
+        v.push(PaletteEntry("disabled", self.text.disabled));
+        v.push(PaletteEntry("success", self.semantic.success));
+        v.push(PaletteEntry("info", self.semantic.info));
+        v.push(PaletteEntry("warning", self.semantic.warning));
+        v.push(PaletteEntry("danger", self.semantic.danger));
+        v.push(PaletteEntry("fire", self.semantic.fire));
+        v.push(PaletteEntry("toxic", self.semantic.toxic));
+        v.push(PaletteEntry("psi", self.semantic.psi));
+        v.push(PaletteEntry("rare", self.semantic.rare));
+        v.push(PaletteEntry("tech_neon", self.semantic.tech_neon));
+        v.push(PaletteEntry("common", self.rarity.common));
+        v.push(PaletteEntry("uncommon", self.rarity.uncommon));
+        v.push(PaletteEntry("rare", self.rarity.rare));
+        v.push(PaletteEntry("epic", self.rarity.epic));
+        v.push(PaletteEntry("legendary", self.rarity.legendary));
+        v.push(PaletteEntry("artifact", self.rarity.artifact));
+        v.push(PaletteEntry("g00_black", self.grayscale.g00_black));
+        v.push(PaletteEntry("g05_charcoal", self.grayscale.g05_charcoal));
+        v.push(PaletteEntry("g10_ink", self.grayscale.g10_ink));
+        v.push(PaletteEntry("g15_dark", self.grayscale.g15_dark));
+        v.push(PaletteEntry("g20_graphite", self.grayscale.g20_graphite));
+        v.push(PaletteEntry("g30_slate", self.grayscale.g30_slate));
+        v.push(PaletteEntry("g40_ash", self.grayscale.g40_ash));
+        v.push(PaletteEntry("g50_mid", self.grayscale.g50_mid));
+        v.push(PaletteEntry("g60_fog", self.grayscale.g60_fog));
+        v.push(PaletteEntry("g70_mist", self.grayscale.g70_mist));
+        v.push(PaletteEntry("g80_silver", self.grayscale.g80_silver));
+        v.push(PaletteEntry("g90_pale", self.grayscale.g90_pale));
+        v.push(PaletteEntry("g100_white", self.grayscale.g100_white));
+        v
+    }
+}
+
 // ==================== 颜色分类结构 ====================
 
 #[derive(Debug, Clone)]

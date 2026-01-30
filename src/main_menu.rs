@@ -7,6 +7,7 @@ use crate::canvas::{
 };
 use crate::status_bar::StatusBarExternalHoverText;
 use crate::AppSet;
+use crate::AppState;
 
 // ==================== 常量 ====================
 
@@ -144,12 +145,17 @@ fn cell_to_main_menu_button(x: usize, y: usize) -> Option<MainMenuButton> {
 // ==================== 系统：响应画布格子事件（hover/click） ====================
 
 fn main_menu_cell_events(
+    app_state: Res<State<AppState>>,
     mut state: ResMut<MainMenuState>,
     mut external: ResMut<StatusBarExternalHoverText>,
     mut ev_hover: EventReader<CellHoverEvent>,
     mut ev_press: EventReader<CellPressEvent>,
     mut ev_release: EventReader<CellReleaseEvent>,
+    mut app_exit: EventWriter<AppExit>,
 ) {
+    if *app_state.get() != AppState::MainMenu {
+        return;
+    }
     for ev in ev_hover.read() {
         state.hovered = ev.cell.and_then(|(x, y)| cell_to_main_menu_button(x, y));
         // 主菜单按钮（图标或文字任意格）悬浮时设置状态栏显示完整按钮文本
@@ -172,7 +178,7 @@ fn main_menu_cell_events(
                         // TODO: 制作人员
                     }
                     MainMenuButton::Quit => {
-                        // TODO: 离开游戏
+                        app_exit.write(AppExit::Success);
                     }
                 }
             }
@@ -184,10 +190,14 @@ fn main_menu_cell_events(
 // ==================== 系统：绘制主菜单 ====================
 
 fn main_menu_draw(
+    app_state: Res<State<AppState>>,
     mut canvas: ResMut<Canvas>,
     mut state: ResMut<MainMenuState>,
     theme: Res<crate::theme::Theme>,
 ) {
+    if *app_state.get() != AppState::MainMenu {
+        return;
+    }
     let changed = state.hovered != state.prev_hovered || state.pressed != state.prev_pressed;
     if !changed {
         return;

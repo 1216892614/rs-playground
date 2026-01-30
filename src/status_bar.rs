@@ -6,6 +6,7 @@ use crate::canvas::{
     CellHoverEvent, CellPressEvent, CellReleaseEvent, Canvas, TextAlign, CANVAS_WIDTH,
 };
 use crate::AppSet;
+use crate::AppState;
 
 // ==================== 常量 ====================
 
@@ -33,22 +34,26 @@ pub struct StatusBarExternalHoverText(pub Option<String>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StatusBarButton {
-    GridToggle,
+    /// 主菜单时：像素编辑器入口；像素编辑页时：返回
+    Left,
     Settings,
 }
 
 impl StatusBarButton {
     fn cell(&self) -> (usize, usize) {
         match self {
-            StatusBarButton::GridToggle => (GRID_TOGGLE_X, STATUS_ROW_BOTTOM),
+            StatusBarButton::Left => (GRID_TOGGLE_X, STATUS_ROW_BOTTOM),
             StatusBarButton::Settings => (SETTINGS_BUTTON_X, STATUS_ROW_BOTTOM),
         }
     }
 
     /// 悬浮在按钮上时状态栏显示的完整描述（不依赖画布事件的 text）
-    fn hover_label(&self, grid_visible: bool) -> &'static str {
+    fn hover_label(&self, app_state: &AppState) -> &'static str {
         match self {
-            StatusBarButton::GridToggle => if grid_visible { "网格线" } else { "网格关" },
+            StatusBarButton::Left => match app_state {
+                AppState::MainMenu => "像素编辑器",
+                AppState::PixelEditor => "返回主菜单",
+            },
             StatusBarButton::Settings => "设置",
         }
     }
@@ -60,8 +65,8 @@ impl StatusBarButton {
 struct StatusBarState {
     hovered: Option<StatusBarButton>,
     pressed: Option<StatusBarButton>,
-    /// 释放时在 GridToggle 上则本帧消费并切换网格
-    pending_grid_toggle: bool,
+    /// 释放时在 Left 上则本帧消费：主菜单进入像素编辑器，像素编辑页返回主菜单
+    pending_left_click: bool,
     /// 悬停位置的完整文本（用于滚动展示）
     hover_text: String,
     scroll_offset: usize,
@@ -72,6 +77,7 @@ struct StatusBarState {
     prev_hover_text: String,
     prev_scroll_offset: usize,
     prev_grid_visible: bool,
+    prev_app_state: Option<AppState>,
 }
 
 impl Default for StatusBarState {
@@ -79,7 +85,7 @@ impl Default for StatusBarState {
         Self {
             hovered: None,
             pressed: None,
-            pending_grid_toggle: false,
+            pending_left_click: false,
             hover_text: String::new(),
             scroll_offset: 0,
             scroll_timer: 0.0,
@@ -87,7 +93,8 @@ impl Default for StatusBarState {
             prev_pressed: None,
             prev_hover_text: String::new(),
             prev_scroll_offset: 0,
-            prev_grid_visible: false, // 与 canvas 初始 true 不同，确保首帧会重绘
+            prev_grid_visible: false,
+            prev_app_state: None,
         }
     }
 }
@@ -119,7 +126,7 @@ fn cell_to_status_bar_button(x: usize, y: usize) -> Option<StatusBarButton> {
         return None;
     }
     if x == GRID_TOGGLE_X {
-        return Some(StatusBarButton::GridToggle);
+        return Some(StatusBarButton::Left);
     }
     if x == SETTINGS_BUTTON_X {
         return Some(StatusBarButton::Settings);
@@ -130,18 +137,18 @@ fn cell_to_status_bar_button(x: usize, y: usize) -> Option<StatusBarButton> {
 // ==================== 系统：响应画布格子事件（悬浮文本 + 按钮 hover/click） ====================
 
 fn status_bar_cell_events(
+    app_state: Res<State<AppState>>,
     mut state: ResMut<StatusBarState>,
-    canvas: Res<Canvas>,
     external: Res<StatusBarExternalHoverText>,
     mut ev_hover: EventReader<CellHoverEvent>,
     mut ev_press: EventReader<CellPressEvent>,
     mut ev_release: EventReader<CellReleaseEvent>,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
     for ev in ev_hover.read() {
         state.hovered = ev.cell.and_then(|(x, y)| cell_to_status_bar_button(x, y));
-        // 只根据按钮绑定或外部设置，不绑定 string 的悬浮事件
         state.hover_text = match state.hovered {
-            Some(btn) => btn.hover_label(canvas.grid_visible()).to_string(),
+            Some(btn) => btn.hover_label(app_state.get()).to_string(),
             None => external.0.clone().unwrap_or_default(),
         };
     }
@@ -152,13 +159,20 @@ fn status_bar_cell_events(
         if let Some(btn) = state.pressed {
             if cell_to_status_bar_button(ev.x, ev.y) == Some(btn) {
                 match btn {
-                    StatusBarButton::GridToggle => state.pending_grid_toggle = true,
+                    StatusBarButton::Left => state.pending_left_click = true,
                     StatusBarButton::Settings => {
                         // TODO: 打开设置页
                     }
                 }
             }
             state.pressed = None;
+        }
+    }
+    if state.pending_left_click {
+        state.pending_left_click = false;
+        match app_state.get() {
+            AppState::MainMenu => next_state.set(AppState::PixelEditor),
+            AppState::PixelEditor => next_state.set(AppState::MainMenu),
         }
     }
 }
@@ -180,22 +194,19 @@ fn status_bar_scroll_tick(time: Res<Time>, mut state: ResMut<StatusBarState>) {
 // ==================== 系统：绘制状态栏 ====================
 
 fn status_bar_draw(
+    app_state: Res<State<AppState>>,
     mut canvas: ResMut<Canvas>,
     mut state: ResMut<StatusBarState>,
     theme: Res<crate::theme::Theme>,
 ) {
-    if state.pending_grid_toggle {
-        let visible = canvas.grid_visible();
-        canvas.set_grid_visible(!visible);
-        state.pending_grid_toggle = false;
-    }
-
     let grid_visible = canvas.grid_visible();
+    let current_state = app_state.get().clone();
     let changed = state.hovered != state.prev_hovered
         || state.pressed != state.prev_pressed
         || state.hover_text != state.prev_hover_text
         || state.scroll_offset != state.prev_scroll_offset
-        || grid_visible != state.prev_grid_visible;
+        || grid_visible != state.prev_grid_visible
+        || state.prev_app_state.as_ref() != Some(&current_state);
     if !changed {
         return;
     }
@@ -228,17 +239,20 @@ fn status_bar_draw(
         theme.text.muted,
     );
 
-    // 第 53 行：左 1 格 = 网格开关，1..95 = 滚动文本，95 = 设置
-    let (gx, gy) = StatusBarButton::GridToggle.cell();
-    let grid_label = if canvas.grid_visible() { "线" } else { "关" };
+    // 第 53 行：左 1 格 = 像素编辑器/返回，1..95 = 滚动文本，95 = 设置
+    let (gx, gy) = StatusBarButton::Left.cell();
+    let left_label = match app_state.get() {
+        AppState::MainMenu => "像",
+        AppState::PixelEditor => "返",
+    };
     canvas.set_line_with_bg(
         gy,
         gx,
         gx + 1,
-        grid_label,
+        left_label,
         TextAlign::Center,
         theme.text.primary,
-        button_bg(StatusBarButton::GridToggle),
+        button_bg(StatusBarButton::Left),
     );
 
     let scroll_content = scroll_text_for_display(
@@ -271,7 +285,8 @@ fn status_bar_draw(
     state.prev_pressed = state.pressed;
     state.prev_hover_text = state.hover_text.clone();
     state.prev_scroll_offset = state.scroll_offset;
-    state.prev_grid_visible = canvas.grid_visible();
+    state.prev_grid_visible = grid_visible;
+    state.prev_app_state = Some(current_state);
 }
 
 fn scroll_text_for_display(content: &str, offset: usize, max_cells: usize) -> String {
