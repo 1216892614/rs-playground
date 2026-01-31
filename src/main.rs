@@ -4,6 +4,7 @@ mod canvas;
 mod main_menu;
 mod pixel_editor;
 mod router;
+mod save;
 mod save_load;
 mod status_bar;
 mod theme;

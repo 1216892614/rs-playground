@@ -96,7 +96,7 @@ const ICON_CONTINUE: char = '\u{f04b}'; // play
 pub struct TimelineNode {
     /// 是否为章节自动保存点（用于上一章/下一章跳转）
     pub is_chapter: bool,
-    /// 所属章节名，每个存档都有（如 "序章"、"第一章"）
+    /// 所属章节名，每个存档都有（如 "第一章"）
     pub chapter_name: String,
     /// 保存时的游戏时长显示，如 "01:23:45"
     pub duration_display: String,
@@ -113,28 +113,14 @@ impl TimelineNode {
     }
 }
 
-fn default_timeline_nodes() -> Vec<TimelineNode> {
-    let mut nodes = Vec::with_capacity(32);
-    nodes.push(TimelineNode {
-        is_chapter: true,
-        chapter_name: "序章".to_string(),
-        duration_display: "00:00:00".to_string(),
-    });
-    for i in 1..=24 {
-        let t_min = 5 + i * 3;
-        let h = t_min / 60;
-        let m = t_min % 60;
-        let duration_display = format!("{:02}:{:02}:00", h, m);
-        let ch = (i - 1) / 4 + 1;
-        let chapter_name = format!("第{}章", to_chinese_num(ch));
-        let is_chapter = i % 4 == 0;
-        nodes.push(TimelineNode {
-            is_chapter,
-            chapter_name,
-            duration_display,
-        });
+impl From<crate::save::TimelineSlot> for TimelineNode {
+    fn from(s: crate::save::TimelineSlot) -> Self {
+        Self {
+            is_chapter: s.is_chapter,
+            chapter_name: s.chapter_name,
+            duration_display: s.duration_display,
+        }
     }
-    nodes
 }
 
 fn to_chinese_num(n: usize) -> String {
@@ -150,7 +136,7 @@ fn to_chinese_num(n: usize) -> String {
 
 // ==================== 分支（树状存档） ====================
 
-/// 从某存档分出的分支的元信息；主线无此信息
+/// 从某存档分出的分支的元信息；主线/新游戏无此信息
 #[derive(Clone, Debug)]
 struct ForkMeta {
     /// 分叉时间显示，如 "01:15:00"
@@ -161,48 +147,27 @@ struct ForkMeta {
     pub seq: usize,
 }
 
-/// 一条分支：主线或从某节点分出的 fork
+/// 一条分支：新游戏或从某节点分出的 fork（与 GameSave 对应，用于 UI）
 #[derive(Clone, Debug)]
 struct Branch {
     pub timeline: Vec<TimelineNode>,
-    /// 若为 fork，则表示从哪条分支的哪个节点分出
+    /// 若为 fork，则表示从哪条分支的哪个节点分出 (branch_idx, node_idx)
     pub fork_from: Option<(usize, usize)>,
     pub fork_meta: Option<ForkMeta>,
 }
 
-fn default_branches() -> Vec<Branch> {
-    let main_nodes = default_timeline_nodes();
-    let mut branches = vec![Branch {
-        timeline: main_nodes.clone(),
+/// 初始仅「新游戏」一条分支：第一章 [00:00:00]，无 fork；进入存档界面默认仅此一条
+fn new_game_only_branches() -> Vec<Branch> {
+    let node = TimelineNode {
+        is_chapter: true,
+        chapter_name: "第一章".to_string(),
+        duration_display: "00:00:00".to_string(),
+    };
+    vec![Branch {
+        timeline: vec![node],
         fork_from: None,
         fork_meta: None,
-    }];
-    // 示例：从主线第 5 个节点分出的 fork，沿用前 6 个节点后接一段新进度
-    let mut fork_nodes: Vec<TimelineNode> = main_nodes.iter().take(6).cloned().collect();
-    for i in 6..=16usize {
-        let t_min = 25 + i * 4;
-        let h = t_min / 60;
-        let m = t_min % 60;
-        let duration_display = format!("{:02}:{:02}:00", h, m);
-        let ch = (i.saturating_sub(1)) / 4 + 1;
-        let chapter_name = format!("第{}章", to_chinese_num(ch));
-        let is_chapter = i % 4 == 0;
-        fork_nodes.push(TimelineNode {
-            is_chapter,
-            chapter_name,
-            duration_display,
-        });
-    }
-    branches.push(Branch {
-        timeline: fork_nodes,
-        fork_from: Some((0, 5)),
-        fork_meta: Some(ForkMeta {
-            time: "01:15:00".to_string(),
-            chapter: "第一章".to_string(),
-            seq: 1,
-        }),
-    });
-    branches
+    }]
 }
 
 // ==================== 控制按钮 ====================
@@ -364,10 +329,12 @@ fn cell_to_fork_list_index(
 
 #[derive(Resource)]
 struct SaveLoadState {
-    /// 所有分支（主线 + 各 fork）
+    /// 所有分支（新游戏 + 从磁盘加载的 fork）
     branches: Vec<Branch>,
     /// 当前查看的分支 id
     current_branch_id: usize,
+    /// 加载时抛弃的不兼容存档数量；>0 时禁用开始/继续游戏
+    pub incompatible_save_count: usize,
     /// 当前分支的时间轴（= branches[current_branch_id].timeline）
     nodes: Vec<TimelineNode>,
     target: usize,
@@ -393,13 +360,15 @@ struct SaveLoadState {
 
 impl Default for SaveLoadState {
     fn default() -> Self {
-        let branches = default_branches();
+        let branches = new_game_only_branches();
         let current_branch_id = 0;
         let nodes = branches[0].timeline.clone();
+        // 仅第一章时 target=0，按钮为「新游戏」
         let last = nodes.len().saturating_sub(1);
         Self {
             branches,
             current_branch_id,
+            incompatible_save_count: 0,
             nodes,
             target: last,
             view: last as f32,
@@ -427,10 +396,6 @@ impl SaveLoadState {
     fn current_branch(&self) -> &Branch {
         &self.branches[self.current_branch_id]
     }
-    /// 是否为主线（第一个分支）
-    fn is_main_branch(&self) -> bool {
-        self.current_branch_id == 0
-    }
     /// 右侧列表应显示的 branch_id（分叉点含父分支，否则为该节点分出的 fork）
     fn list_branch_ids(&self) -> Vec<usize> {
         list_branch_ids(self)
@@ -445,6 +410,22 @@ impl SaveLoadState {
     /// 是否为最新进度（只有最新进度显示「继续游戏」）
     fn is_latest_progress(&self) -> bool {
         self.nodes.len() > 0 && self.target == self.nodes.len() - 1
+    }
+    /// 是否存在不兼容存档（有则禁用开始/继续游戏）
+    fn has_incompatible_saves(&self) -> bool {
+        self.incompatible_save_count > 0
+    }
+    /// 继续按钮文案：选第一个章节为「新游戏」，最新进度为「继续游戏」，否则「开始游戏」；有不兼容存档时提示
+    fn continue_button_label(&self) -> &'static str {
+        if self.has_incompatible_saves() {
+            "存档版本不兼容"
+        } else if self.target == 0 {
+            "新游戏"
+        } else if self.is_latest_progress() {
+            "继续游戏"
+        } else {
+            "开始游戏"
+        }
     }
     /// 切换到指定分支，并定位到该分支最新进度（不更新 prev_*，由绘制帧末更新，以便本帧触发重绘）
     fn switch_to_branch(&mut self, branch_id: usize) {
@@ -557,11 +538,7 @@ fn save_load_cell_events(
                     state.hovered_back = false;
                     state.hovered_node = None;
                     state.hovered_fork_index = None;
-                    external.0 = Some(if state.is_latest_progress() {
-                        "继续游戏".to_string()
-                    } else {
-                        "开始游戏".to_string()
-                    });
+                    external.0 = Some(state.continue_button_label().to_string());
                 } else if cell_to_back_button(x, y) {
                     state.hovered_control = None;
                     state.hovered_continue = false;
@@ -590,7 +567,7 @@ fn save_load_cell_events(
                         b.fork_meta
                             .as_ref()
                             .map(|m| format!("切换到 [{}] #{}", m.time, m.seq))
-                            .unwrap_or_else(|| "切换到 [00:00:00] 序章 #0".to_string()),
+                            .unwrap_or_else(|| "切换到 [00:00:00] 第一章 #0".to_string()),
                     );
                 } else {
                     state.hovered_control = None;
@@ -639,7 +616,9 @@ fn save_load_cell_events(
                 }
             }
         } else if cell_to_continue_button(x, y) {
-            // TODO: 实际开始/继续游戏
+            if !state.has_incompatible_saves() {
+                // TODO: 实际开始/继续游戏
+            }
         } else if cell_to_back_button(x, y) {
             ev_pop.write(NavigatePop);
         } else if let Some(idx) = cell_to_timeline_node_index(x, y, &state.nodes, state.target) {
@@ -760,7 +739,7 @@ fn draw_timeline_content(
         .fork_meta
         .as_ref()
         .map(|m| format!("分叉与 [{}] {} [#{}]", m.time, m.chapter, m.seq))
-        .unwrap_or_else(|| "分叉与 [00:00:00] 序章 [#0]".to_string());
+        .unwrap_or_else(|| "分叉与 [00:00:00] 第一章 [#0]".to_string());
     canvas.set_line_layer(
         TIMELINE_CONTENT_LAYER,
         TITLE_Y,
@@ -831,7 +810,7 @@ fn draw_timeline_content(
         let branch = &state.branches[branch_id];
         let (line1, line2) = match &branch.fork_meta {
             Some(m) => (format!("[{}] {}", m.time, m.chapter), format!("#{}", m.seq)),
-            None => ("[00:00:00] 序章".to_string(), "#0".to_string()),
+            None => ("[00:00:00] 第一章".to_string(), "#0".to_string()),
         };
         canvas.set_line_layer(
             TIMELINE_CONTENT_LAYER,
@@ -902,11 +881,7 @@ fn draw_controller_content(
             bg,
         );
     }
-    let continue_text = if state.is_latest_progress() {
-        "继续游戏"
-    } else {
-        "开始游戏"
-    };
+    let continue_text = state.continue_button_label();
     canvas.set_char_with_bg_layer(
         CONTROLLER_CONTENT_LAYER,
         CONTINUE_X_START,

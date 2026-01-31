@@ -21,6 +21,10 @@ bevy = { version = "0.17.3", features = [
 ] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+rmp-serde = "1.3"
+cuid2 = "0.1"
+rand = { version = "0.8", features = ["std_rng"] }
+semver = "1.0"
 chrono = "0.4"
 toml = "0.8"
 unicode-width = "0.2"
