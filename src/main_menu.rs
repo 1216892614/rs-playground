@@ -1,10 +1,12 @@
 //! 主界面：ASCII 标题 INTERSTICE + 带 Nerd 图标的按钮（开始游戏、设置、制作人员、离开游戏），支持 hover/click 变色。
 //! 通过 CellHoverEvent / CellPressEvent / CellReleaseEvent 实现悬浮与点击。
+//! 逻辑：main_menu_cell_events；渲染：main_menu_draw。
 
 use bevy::prelude::*;
 use crate::canvas::{
     CellHoverEvent, CellPressEvent, CellReleaseEvent, Canvas, TextAlign, CANVAS_HEIGHT, CANVAS_WIDTH,
 };
+use crate::router::{NavigatePush, Route};
 use crate::status_bar::StatusBarExternalHoverText;
 use crate::AppSet;
 use crate::AppState;
@@ -155,7 +157,7 @@ fn main_menu_cell_events(
     mut ev_press: EventReader<CellPressEvent>,
     mut ev_release: EventReader<CellReleaseEvent>,
     mut app_exit: EventWriter<AppExit>,
-    mut next_state: ResMut<NextState<AppState>>,
+    mut ev_push: MessageWriter<NavigatePush>,
 ) {
     if *app_state.get() != AppState::MainMenu {
         return;
@@ -173,7 +175,7 @@ fn main_menu_cell_events(
             if cell_to_main_menu_button(ev.x, ev.y) == Some(btn) {
                 match btn {
                     MainMenuButton::Start => {
-                        next_state.set(AppState::SaveLoad);
+                        ev_push.write(NavigatePush(Route::save_load()));
                     }
                     MainMenuButton::Settings => {
                         // TODO: 打开设置

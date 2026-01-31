@@ -1,4 +1,5 @@
 //! 像素编辑器：16×16 图标编辑，调色板（theme 颜色）、导出 JSON 到剪贴板、从剪贴板导入。
+//! 逻辑：pixel_editor_cell_events；渲染：pixel_editor_draw。
 
 use bevy::color::Srgba;
 use bevy::prelude::*;
@@ -264,7 +265,7 @@ fn pixel_editor_cell_events(
     mut ev_hover: EventReader<CellHoverEvent>,
     mut ev_press: EventReader<CellPressEvent>,
     mut ev_release: EventReader<CellReleaseEvent>,
-    mut next_state: ResMut<NextState<crate::AppState>>,
+    mut ev_pop: MessageWriter<crate::router::NavigatePop>,
 ) {
     if *state.get() != crate::AppState::PixelEditor {
         return;
@@ -367,7 +368,7 @@ fn pixel_editor_cell_events(
                     }
                 }
                 EditorButton::Back => {
-                    next_state.set(crate::AppState::MainMenu);
+                    ev_pop.write(crate::router::NavigatePop);
                 }
             }
         }

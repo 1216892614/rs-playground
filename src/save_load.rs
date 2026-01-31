@@ -1,14 +1,16 @@
 //! 开始游戏界面：竖式时间轴存档/章节选择，滚轮与点击切换节点，弹簧插值动画，播放器式控制按钮。
+//! 逻辑：save_load_cell_events、save_load_spring、save_load_scroll；渲染：save_load_draw 及 draw_*。
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
 
-use crate::canvas::{
-    CellHoverEvent, CellPressEvent, CellReleaseEvent, Canvas, TextAlign, CANVAS_WIDTH,
-};
-use crate::status_bar::StatusBarExternalHoverText;
 use crate::AppSet;
 use crate::AppState;
+use crate::canvas::{
+    CANVAS_WIDTH, Canvas, CellHoverEvent, CellPressEvent, CellReleaseEvent, TextAlign,
+};
+use crate::router::NavigatePop;
+use crate::status_bar::StatusBarExternalHoverText;
 
 /// 时间轴与控制器拆分到不同图层，避免重绘互相覆盖 hover
 /// 时间轴内容（标题、竖线、节点）
@@ -80,13 +82,13 @@ const SPRING_STIFFNESS: f32 = 12.0;
 const SPRING_DAMPING: f32 = 0.7;
 
 // 控制按钮图标：游戏开始/最新进度用 step-backward/forward，上下存档用左右三角，上下章用 PUA
-const ICON_START: char = '\u{f048}';         // step-backward → 游戏开始
-const ICON_LATEST: char = '\u{f051}';        // step-forward → 最新进度
-const ICON_PREV_SAVE: char = '\u{25c0}';    // ◀ 左三角 → 上一个存档
-const ICON_NEXT_SAVE: char = '\u{25b6}';    // ▶ 右三角 → 下一个存档
+const ICON_START: char = '\u{f048}'; // step-backward → 游戏开始
+const ICON_LATEST: char = '\u{f051}'; // step-forward → 最新进度
+const ICON_PREV_SAVE: char = '\u{25c0}'; // ◀ 左三角 → 上一个存档
+const ICON_NEXT_SAVE: char = '\u{25b6}'; // ▶ 右三角 → 下一个存档
 const ICON_PREV_CHAPTER: char = '\u{f045f}'; // 上一章 (U+F045F，来自 \udb81\udc5f)
 const ICON_NEXT_CHAPTER: char = '\u{f0211}'; // 下一章 (U+F0211，来自 \udb80\ude11)
-const ICON_CONTINUE: char = '\u{f04b}';     // play
+const ICON_CONTINUE: char = '\u{f04b}'; // play
 
 // ==================== 时间轴节点 ====================
 
@@ -307,7 +309,11 @@ fn cell_to_timeline_node_index(
 }
 
 /// 当前选中节点分出的 fork 的 branch_id 列表（不含父分支）
-fn fork_branch_ids_from(branches: &[Branch], from_branch_id: usize, from_node: usize) -> Vec<usize> {
+fn fork_branch_ids_from(
+    branches: &[Branch],
+    from_branch_id: usize,
+    from_node: usize,
+) -> Vec<usize> {
     branches
         .iter()
         .enumerate()
@@ -351,11 +357,7 @@ fn cell_to_fork_list_index(
     let row = y - FORK_LIST_ROW_START;
     let item = row / FORK_ITEM_HEIGHT;
     let idx = fork_list_offset + item;
-    if idx < fork_count {
-        Some(idx)
-    } else {
-        None
-    }
+    if idx < fork_count { Some(idx) } else { None }
 }
 
 // ==================== 状态 ====================
@@ -483,11 +485,7 @@ impl Plugin for SaveLoadPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    save_load_spring,
-                    save_load_scroll,
-                    save_load_draw,
-                )
+                (save_load_spring, save_load_scroll, save_load_draw)
                     .run_if(in_state(AppState::SaveLoad)),
             );
     }
@@ -506,10 +504,7 @@ fn save_load_spring(time: Res<Time>, mut state: ResMut<SaveLoadState>) {
 
 // ==================== 系统：滚轮切换节点 ====================
 
-fn save_load_scroll(
-    mut scroll_reader: EventReader<MouseWheel>,
-    mut state: ResMut<SaveLoadState>,
-) {
+fn save_load_scroll(mut scroll_reader: EventReader<MouseWheel>, mut state: ResMut<SaveLoadState>) {
     let len = state.nodes.len().max(1);
     for ev in scroll_reader.read() {
         if ev.y > 0.0 {
@@ -529,7 +524,7 @@ fn save_load_cell_events(
     mut ev_hover: EventReader<CellHoverEvent>,
     _ev_press: EventReader<CellPressEvent>,
     mut ev_release: EventReader<CellReleaseEvent>,
-    mut next_state: ResMut<NextState<AppState>>,
+    mut ev_pop: MessageWriter<NavigatePop>,
 ) {
     if *app_state.get() != AppState::SaveLoad {
         return;
@@ -574,7 +569,8 @@ fn save_load_cell_events(
                     state.hovered_node = None;
                     state.hovered_fork_index = None;
                     external.0 = Some("返回主菜单".to_string());
-                } else if let Some(idx) = cell_to_timeline_node_index(x, y, &state.nodes, state.target)
+                } else if let Some(idx) =
+                    cell_to_timeline_node_index(x, y, &state.nodes, state.target)
                 {
                     state.hovered_control = None;
                     state.hovered_continue = false;
@@ -645,7 +641,7 @@ fn save_load_cell_events(
         } else if cell_to_continue_button(x, y) {
             // TODO: 实际开始/继续游戏
         } else if cell_to_back_button(x, y) {
-            next_state.set(AppState::MainMenu);
+            ev_pop.write(NavigatePop);
         } else if let Some(idx) = cell_to_timeline_node_index(x, y, &state.nodes, state.target) {
             state.target = idx;
         } else {
@@ -759,9 +755,12 @@ fn draw_timeline_content(
         TextAlign::Left,
         text_color,
     );
-    let fork_info = state.current_branch().fork_meta.as_ref().map(|m| {
-        format!("分叉与 [{}] {} [#{}]", m.time, m.chapter, m.seq)
-    }).unwrap_or_else(|| "分叉与 [00:00:00] 序章 [#0]".to_string());
+    let fork_info = state
+        .current_branch()
+        .fork_meta
+        .as_ref()
+        .map(|m| format!("分叉与 [{}] {} [#{}]", m.time, m.chapter, m.seq))
+        .unwrap_or_else(|| "分叉与 [00:00:00] 序章 [#0]".to_string());
     canvas.set_line_layer(
         TIMELINE_CONTENT_LAYER,
         TITLE_Y,
@@ -780,10 +779,21 @@ fn draw_timeline_content(
         if y < TIMELINE_VIEW_TOP || y > TIMELINE_VIEW_BOTTOM {
             continue;
         }
-        let has_forks = !fork_branch_ids_from(&state.branches, state.current_branch_id, idx).is_empty()
-            || state.current_branch().fork_from.map(|(_, from_node)| from_node == idx).unwrap_or(false);
+        let has_forks = !fork_branch_ids_from(&state.branches, state.current_branch_id, idx)
+            .is_empty()
+            || state
+                .current_branch()
+                .fork_from
+                .map(|(_, from_node)| from_node == idx)
+                .unwrap_or(false);
         if has_forks {
-            canvas.set_char_layer(TIMELINE_CONTENT_LAYER, TIMELINE_X.saturating_sub(1), y, '◇', dim_color);
+            canvas.set_char_layer(
+                TIMELINE_CONTENT_LAYER,
+                TIMELINE_X.saturating_sub(1),
+                y,
+                '◇',
+                dim_color,
+            );
         }
         let is_selected = idx == state.target;
         let dot_ch = if is_selected { '●' } else { '◦' };
@@ -938,11 +948,7 @@ fn draw_controller_content(
 }
 
 /// 时间轴 hover 层：仅节点行高亮
-fn draw_timeline_hover(
-    canvas: &mut Canvas,
-    state: &SaveLoadState,
-    hover_bg: bevy::prelude::Color,
-) {
+fn draw_timeline_hover(canvas: &mut Canvas, state: &SaveLoadState, hover_bg: bevy::prelude::Color) {
     if let Some(idx) = state.hovered_node {
         let y = (TIMELINE_CENTER_Y as i32
             + (idx as i32 - state.target as i32) * NODE_SPACING as i32) as usize;
@@ -986,9 +992,7 @@ fn draw_controller_hover(
     }
     if let Some(fork_idx) = state.hovered_fork_index {
         let row0 = FORK_LIST_ROW_START
-            .saturating_add(
-                fork_idx.saturating_sub(state.fork_list_offset) * FORK_ITEM_HEIGHT,
-            );
+            .saturating_add(fork_idx.saturating_sub(state.fork_list_offset) * FORK_ITEM_HEIGHT);
         if row0 <= FORK_LIST_ROW_END {
             canvas.fill_background_rect_layer(
                 CONTROLLER_HOVER_LAYER,

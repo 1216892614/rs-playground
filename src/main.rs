@@ -3,11 +3,13 @@ use bevy::{asset::io::web::WebAssetPlugin, prelude::*};
 mod canvas;
 mod main_menu;
 mod pixel_editor;
+mod router;
 mod save_load;
 mod status_bar;
 mod theme;
 
 use canvas::Canvas;
+use router::RouterPlugin;
 
 /// 应用页面状态
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -36,6 +38,7 @@ fn main() {
         .init_state::<AppState>()
         .add_plugins(theme::ThemePlugin)
         .add_plugins(canvas::CanvasPlugin)
+        .add_plugins(RouterPlugin)
         .add_plugins(main_menu::MainMenuPlugin)
         .add_plugins(status_bar::StatusBarPlugin)
         .add_plugins(pixel_editor::PixelEditorPlugin)

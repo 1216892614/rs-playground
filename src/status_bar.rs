@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use crate::canvas::{
     CellHoverEvent, CellPressEvent, CellReleaseEvent, Canvas, TextAlign, CANVAS_WIDTH,
 };
+use crate::router::{NavigatePop, NavigatePush, Route};
 use crate::AppSet;
 use crate::AppState;
 
@@ -144,7 +145,8 @@ fn status_bar_cell_events(
     mut ev_hover: EventReader<CellHoverEvent>,
     mut ev_press: EventReader<CellPressEvent>,
     mut ev_release: EventReader<CellReleaseEvent>,
-    mut next_state: ResMut<NextState<AppState>>,
+    mut ev_push: MessageWriter<NavigatePush>,
+    mut ev_pop: MessageWriter<NavigatePop>,
 ) {
     for ev in ev_hover.read() {
         state.hovered = ev.cell.and_then(|(x, y)| cell_to_status_bar_button(x, y));
@@ -172,9 +174,12 @@ fn status_bar_cell_events(
     if state.pending_left_click {
         state.pending_left_click = false;
         match app_state.get() {
-            AppState::MainMenu => next_state.set(AppState::PixelEditor),
-            AppState::PixelEditor => next_state.set(AppState::MainMenu),
-            AppState::SaveLoad => next_state.set(AppState::MainMenu),
+            AppState::MainMenu => {
+                ev_push.write(NavigatePush(Route::pixel_editor()));
+            }
+            AppState::PixelEditor | AppState::SaveLoad => {
+                ev_pop.write(NavigatePop);
+            }
         }
     }
 }
