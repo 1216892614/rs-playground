@@ -467,6 +467,8 @@ fn save_load_enter_latest(mut state: ResMut<SaveLoadState>) {
     state.view = last as f32;
     state.prev_target = last;
     state.prev_branch_id = state.current_branch_id;
+    // 使本帧绘制认为“刚进入”，触发完整重绘（否则从主菜单返回时 prev_app_state 仍为 SaveLoad 会跳过重绘）
+    state.prev_app_state = None;
 }
 
 impl Plugin for SaveLoadPlugin {
