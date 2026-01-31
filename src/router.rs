@@ -18,6 +18,10 @@ pub struct SaveLoadRouteData {}
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PixelEditorRouteData {}
 
+/// 新建人物路由数据（预留：如从哪个存档的 id 开始创建人物）
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CharacterCreationRouteData {}
+
 // ==================== 路由枚举 ====================
 
 /// 页面路由（平铺，无子路由）；可带数据用于页面间通讯。
@@ -26,6 +30,7 @@ pub enum Route {
     MainMenu(Option<MainMenuRouteData>),
     SaveLoad(Option<SaveLoadRouteData>),
     PixelEditor(Option<PixelEditorRouteData>),
+    CharacterCreation(Option<CharacterCreationRouteData>),
 }
 
 impl Route {
@@ -47,6 +52,12 @@ impl Route {
     pub fn pixel_editor_with(data: PixelEditorRouteData) -> Self {
         Route::PixelEditor(Some(data))
     }
+    pub fn character_creation() -> Self {
+        Route::CharacterCreation(None)
+    }
+    pub fn character_creation_with(data: CharacterCreationRouteData) -> Self {
+        Route::CharacterCreation(Some(data))
+    }
 }
 
 /// 路由 → AppState（用于 run_if(in_state(...))）
@@ -55,6 +66,7 @@ pub fn route_to_app_state(route: &Route) -> AppState {
         Route::MainMenu(_) => AppState::MainMenu,
         Route::SaveLoad(_) => AppState::SaveLoad,
         Route::PixelEditor(_) => AppState::PixelEditor,
+        Route::CharacterCreation(_) => AppState::CharacterCreation,
     }
 }
 

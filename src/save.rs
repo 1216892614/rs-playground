@@ -2,6 +2,7 @@
 //! 结构变更时 bump SAVE_VERSION，无法迁移兼容的旧存档会被自动抛弃并禁用开始游戏。
 //! 版本比较使用 semver 语义化版本。
 
+use bevy::prelude::Resource;
 use rand::RngCore;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,32 @@ pub struct TimelineSlot {
     pub duration_display: String,
 }
 
+/// 队伍中的一名角色；每个角色有唯一 cuid2，初始角色名为 HAJIMEHERO
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Character {
+    /// 角色唯一 id（cuid2）
+    pub id: String,
+    /// 显示名；初始角色默认 HAJIMEHERO
+    pub name: String,
+    /// 基础属性：执行、反应、习性（0..=20，创建时单属性最高 15）
+    pub attr_execution: u8,
+    pub attr_reaction: u8,
+    pub attr_habit: u8,
+}
+
+impl Character {
+    /// 创建初始角色：cuid2、名字 HAJIMEHERO、基础属性 10/10/10
+    pub fn initial_player() -> Self {
+        Self {
+            id: cuid2::create_id(),
+            name: "HAJIMEHERO".to_string(),
+            attr_execution: 10,
+            attr_reaction: 10,
+            attr_habit: 10,
+        }
+    }
+}
+
 /// 单个 fork 的存档文件结构（每个 fork 一个文件，rmp-serde 序列化）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameSave {
@@ -46,6 +73,8 @@ pub struct GameSave {
     pub seed: [u8; 32],
     /// 该分支的时间轴槽位列表
     pub timeline: Vec<TimelineSlot>,
+    /// 玩家队伍中的角色列表；新游戏时包含一名初始角色（HAJIMEHERO）
+    pub characters: Vec<Character>,
 }
 
 impl GameSave {
@@ -57,7 +86,7 @@ impl GameSave {
         }
     }
 
-    /// 创建新游戏存档：id=cuid2，name="[00:00:00] 第一章"，无 fork_from，随机 seed，仅第一章一个槽位
+    /// 创建新游戏存档：id=cuid2，name="[00:00:00] 第一章"，无 fork_from，随机 seed，仅第一章一个槽位，队伍含一名初始角色 HAJIMEHERO
     pub fn new_game() -> Self {
         let mut seed = [0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut seed);
@@ -72,6 +101,13 @@ impl GameSave {
                 chapter_name: "第一章".to_string(),
                 duration_display: "00:00:00".to_string(),
             }],
+            characters: vec![Character::initial_player()],
         }
     }
 }
+
+// ==================== 进行中的新游戏 ====================
+
+/// 点击「新游戏」后创建的存档；进入新建人物界面时编辑其中的初始角色，完成或返回时清空
+#[derive(Resource, Default)]
+pub struct NewGameInProgress(pub Option<GameSave>);

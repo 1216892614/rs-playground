@@ -1,6 +1,7 @@
 use bevy::{asset::io::web::WebAssetPlugin, prelude::*};
 
 mod canvas;
+mod character_creation;
 mod main_menu;
 mod pixel_editor;
 mod router;
@@ -20,6 +21,8 @@ pub enum AppState {
     PixelEditor,
     /// 开始游戏：存档/章节选择时间轴
     SaveLoad,
+    /// 新建人物：分步角色创建界面
+    CharacterCreation,
 }
 
 /// 系统顺序：当前页面的 cell 事件先消费（避免 hover 被主菜单抢先消费），再主菜单/状态栏
@@ -44,6 +47,7 @@ fn main() {
         .add_plugins(status_bar::StatusBarPlugin)
         .add_plugins(pixel_editor::PixelEditorPlugin)
         .add_plugins(save_load::SaveLoadPlugin)
+        .add_plugins(character_creation::CharacterCreationPlugin)
         .configure_sets(
             Update,
             (
@@ -54,9 +58,11 @@ fn main() {
                 .chain(),
         )
         .insert_resource(ClearColor(Color::BLACK))
+        .insert_resource(save::NewGameInProgress::default())
         .add_systems(Startup, setup)
         .add_systems(OnEnter(AppState::MainMenu), clear_canvas_on_enter_main_menu)
         .add_systems(OnEnter(AppState::SaveLoad), clear_canvas_on_enter_save_load)
+        .add_systems(OnEnter(AppState::CharacterCreation), clear_canvas_on_enter_character_creation)
         .run();
 }
 
@@ -73,5 +79,9 @@ fn clear_canvas_on_enter_main_menu(mut canvas: ResMut<Canvas>) {
 }
 
 fn clear_canvas_on_enter_save_load(mut canvas: ResMut<Canvas>) {
+    canvas.clear();
+}
+
+fn clear_canvas_on_enter_character_creation(mut canvas: ResMut<Canvas>) {
     canvas.clear();
 }

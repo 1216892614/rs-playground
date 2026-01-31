@@ -9,7 +9,8 @@ use crate::AppState;
 use crate::canvas::{
     CANVAS_WIDTH, Canvas, CellHoverEvent, CellPressEvent, CellReleaseEvent, TextAlign,
 };
-use crate::router::NavigatePop;
+use crate::router::{NavigatePop, NavigatePush, Route};
+use crate::save::{GameSave, NewGameInProgress};
 use crate::status_bar::StatusBarExternalHoverText;
 
 /// 时间轴与控制器拆分到不同图层，避免重绘互相覆盖 hover
@@ -501,10 +502,12 @@ fn save_load_scroll(mut scroll_reader: EventReader<MouseWheel>, mut state: ResMu
 fn save_load_cell_events(
     app_state: Res<State<AppState>>,
     mut state: ResMut<SaveLoadState>,
+    mut new_game: ResMut<NewGameInProgress>,
     mut external: ResMut<StatusBarExternalHoverText>,
     mut ev_hover: EventReader<CellHoverEvent>,
     _ev_press: EventReader<CellPressEvent>,
     mut ev_release: EventReader<CellReleaseEvent>,
+    mut ev_push: MessageWriter<NavigatePush>,
     mut ev_pop: MessageWriter<NavigatePop>,
 ) {
     if *app_state.get() != AppState::SaveLoad {
@@ -617,7 +620,13 @@ fn save_load_cell_events(
             }
         } else if cell_to_continue_button(x, y) {
             if !state.has_incompatible_saves() {
-                // TODO: 实际开始/继续游戏
+                if state.target == 0 {
+                    let save = GameSave::new_game();
+                    (*new_game).0 = Some(save);
+                    ev_push.write(NavigatePush(Route::character_creation()));
+                } else {
+                    // TODO: 实际开始/继续游戏（从选中存档进入）
+                }
             }
         } else if cell_to_back_button(x, y) {
             ev_pop.write(NavigatePop);

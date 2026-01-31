@@ -55,6 +55,7 @@ impl StatusBarButton {
                 AppState::MainMenu => "像素编辑器",
                 AppState::PixelEditor => "返回主菜单",
                 AppState::SaveLoad => "返回主菜单",
+                AppState::CharacterCreation => "返回",
             },
             StatusBarButton::Settings => "设置",
         }
@@ -177,7 +178,7 @@ fn status_bar_cell_events(
             AppState::MainMenu => {
                 ev_push.write(NavigatePush(Route::pixel_editor()));
             }
-            AppState::PixelEditor | AppState::SaveLoad => {
+            AppState::PixelEditor | AppState::SaveLoad | AppState::CharacterCreation => {
                 ev_pop.write(NavigatePop);
             }
         }
@@ -252,6 +253,7 @@ fn status_bar_draw(
         AppState::MainMenu => "像",
         AppState::PixelEditor => "返",
         AppState::SaveLoad => "返",
+        AppState::CharacterCreation => "返",
     };
     canvas.set_line_with_bg(
         gy,
